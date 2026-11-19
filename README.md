@@ -1,8 +1,17 @@
-# D-Link DSL Control
+# Home Internet Control
 
-A simple page on your computer that shows who is using the home internet and lets you control each device. It's made for D-Link DSL routers with the classic orange-and-black web page (SETUP / ADVANCED / MAINTENANCE / STATUS / HELP), such as the **DSL-G256DG**. These routers are built on the Broadcom platform.
+A simple page on your computer that shows who is using the home internet and lets you control each device. One program works with several routers: it recognises the router by itself and shows only what that router can do.
 
 ![Home page](docs/home.png)
+
+## Supported routers
+
+| Router | Status | What works |
+|---|---|---|
+| **D-Link DSL routers** with the classic orange-and-black page (SETUP / ADVANCED / MAINTENANCE / STATUS / HELP), such as the **DSL-G256DG**. Broadcom platform. | Full | Everything below |
+| **Bezeq VTech NB403-IL** (VDSL) | Early | Devices, ping. Speed limits and blocking come once someone sends the report from the Check page |
+
+The model is found automatically when you press **Save and connect**. If that ever goes wrong, choose it yourself under **Settings → Router model**. The page then hides anything that router can't do; for example, on the NB403-IL there is no speed graph, no Speed / Pause / Bedtime buttons and no Websites tab yet.
 
 ## What it does
 
@@ -25,12 +34,12 @@ Everything runs on your own computer. Nothing is sent anywhere, except during th
 1. Install **Python 3** from <https://www.python.org/downloads/>. On Windows, tick **"Add python.exe to PATH"** during setup.
 2. Download this project (green **Code** button → **Download ZIP**) and unzip it.
 3. Double-click **`start-windows.bat`** (Windows) or **`start-mac.command`** (Mac).
-4. Your browser opens the page. Go to **Settings**, enter the router password (the one you use for the router's own page, usually at `192.168.1.1`), and press **Save and connect**.
-5. Go to **Check** and press **Run the speed-limit test** once.
+4. Your browser opens the page. Go to **Settings**, enter the router address and password (the ones you use for the router's own page, usually `192.168.1.1`), and press **Save and connect**. The program recognises the router model.
+5. If your router supports speed limits: go to **Check** and press **Run the speed-limit test** once.
 
 Keep the black window open while you use the page; closing it stops the program. Limits, pauses and bedtimes stay on the router even when the program is closed.
 
-To try it without a router: `python run.py --demo`. This starts a fake router.
+To try it without a router: `python run.py --demo` starts a fake D-Link, and `python run.py --demo vtech` a fake NB403-IL.
 
 ## Use it from your phone
 
@@ -49,7 +58,7 @@ Good to know:
 
 ## How it works (and its limits)
 
-The program does what you would do by hand in the router's page, then reads the page again to confirm the router saved it:
+The program does what you would do by hand in the router's page, then reads the page again to confirm the router saved it. On the D-Link:
 
 - **Speed limit** = two rules under *Advanced → Network Tools → QoS Classification*. An upload rule matches the device's hardware address and goes to the internet queue with a rate limit. A download rule matches traffic from the internet to the device's address and goes to that device's Wi-Fi queue with a rate limit. If the router's QoS switch is off, the program switches it on.
 - **Pause / Bedtime** = *Parental Control → Block MAC Address*, with "Always" or a schedule the program creates.
@@ -67,9 +76,17 @@ Things to know:
 - **Rule limits.** The router holds about 16–32 speed rules, so about 8–16 limited devices.
 - **One login at a time.** If someone opens the router's own page while this program runs, one of them may be logged out. The program logs in again by itself.
 
+### Bezeq VTech NB403-IL (early support)
+
+Nobody working on this program has seen this router's pages yet, so for now it only **reads**: it logs in, looks through the router's menu pages and lists the devices it finds in any table of hardware (MAC) and IP addresses. It follows plain links only, never sends a form, and skips anything that sounds like save, apply, reboot, reset or log out. It cannot tell Wi-Fi from cable devices and has no speed graph yet.
+
+To get speed limits and blocking on this router: connect, open **Check → Create report**, and send the report. It lists every page found with its forms and field names (not their values), which is what the full support is built from. If the login fails, the report still shows the router's login form.
+
+Security note for this router: a published advisory says Bezeq's VTech firmware `BZ_2.02.07.09.13.01` uses the router's serial number as the admin password and leaks that number to the home network over UPnP (port 8200). Change the admin password, and turn UPnP off if you don't need it.
+
 ## If something doesn't work
 
-Open **Check → Create report → Copy** and send it to whoever helps you. It lists which router pages and form fields were found. Device addresses are shortened and the password is not included. Most firmware differences can be fixed in `config.json` without changing code:
+Open **Check → Create report → Copy** and send it to whoever helps you. It lists which router pages and form fields were found. Device addresses are shortened and the password is not included. On the D-Link, most firmware differences can be fixed in `config.json` without changing code:
 
 ```json
 {
@@ -78,19 +95,34 @@ Open **Check → Create report → Copy** and send it to whoever helps you. It l
 }
 ```
 
-`pages` names the router page for a feature: `dhcp`, `stations`, `wanstats`, `lanstats`, `qos`, `qosform`, `qosmgmt`, `blockmac`, `sched`, `urlflt`. `params` renames a form field; see `routerctl/router.py` for the keys.
+`pages` names the router page for a feature: `dhcp`, `stations`, `wanstats`, `lanstats`, `qos`, `qosform`, `qosmgmt`, `blockmac`, `sched`, `urlflt`. `params` renames a form field; see `routerctl/drivers/broadcom.py` for the keys.
+
+`"model"` in `config.json` is `"auto"` or one of `"dlink-broadcom"`, `"vtech-nb403"` (the same as the Settings dropdown).
+
+## Adding a router
+
+Each router family is one file in `routerctl/drivers/`. A driver:
+
+1. says how to recognise the router's front page (`identify`) and how to log in (`login`);
+2. lists what it can do (`capabilities`: `devices`, `wifi`, `traffic`, `speed_limit`, `pause`, `bedtime`, `sites`);
+3. implements the methods for those (see `routerctl/drivers/base.py`; anything it doesn't implement says "not supported").
+
+Add it to `DRIVERS` in `routerctl/drivers/__init__.py` and it shows up in the Settings dropdown and in auto-detect. The page needs no change: it hides what the driver doesn't offer.
 
 ## Files
 
 ```
 run.py               starts everything (start-*.bat / start-*.command double-click it)
-routerctl/router.py  talks to the router (login, pages, rules)
+routerctl/drivers/   one file per router family, plus auto-detect (__init__.py) and the shared interface (base.py)
+  broadcom.py        D-Link DSL (Broadcom): login, pages, QoS rules, blocks, schedules, websites
+  vtech.py           Bezeq VTech NB403-IL: early, read-only support
 routerctl/control.py devices, limits, blocks, background checks
 routerctl/selftest.py the speed-limit test
 routerctl/report.py  the report for helpers
 routerctl/qr.py      QR codes for the phone link (no library needed)
 routerctl/web/       the page
-tools/mock_router.py fake router for the demo and tests
+tools/mock_router.py fake D-Link for the demo and tests
+tools/mock_vtech.py  fake NB403-IL (invented pages) for the demo and tests
 tools/make_icons.py  draws the home-screen icons
 tests/               python -m unittest discover -s tests
 config.json          your settings (created on first save, holds the router password — keep it private)
@@ -101,4 +133,4 @@ Requires Python 3.8 or newer; nothing else to install.
 
 ## License
 
-MIT. Not made by or connected with D-Link. Use at your own risk: the program changes settings on your router, and you can always see and undo them in the router's own page.
+MIT. Not made by or connected with D-Link, VTech or Bezeq. Use at your own risk: the program changes settings on your router, and you can always see and undo them in the router's own page.

@@ -1,4 +1,5 @@
-"""Talks to a D-Link DSL router with the Broadcom web interface, over plain HTTP.
+"""D-Link DSL routers with the Broadcom web interface (orange-and-black SETUP /
+ADVANCED / MAINTENANCE / STATUS pages, e.g. DSL-G256DG, DSL-2740B, DSL-2750U).
 
 Every change works the way the router's own pages do it: load the page (which
 carries a one-time ``sessionKey``), then load the URL its JavaScript would
@@ -10,32 +11,12 @@ not fit can be overridden in config.json ("pages" and "params").
 """
 
 import base64
-import http.cookiejar
 import re
-import socket
-import threading
-import time
-import urllib.error
 import urllib.parse
-import urllib.request
 
-from . import parsing as P
-
-
-class RouterError(Exception):
-    pass
-
-
-class LoginError(RouterError):
-    pass
-
-
-class PageMissing(RouterError):
-    pass
-
-
-class ActionError(RouterError):
-    pass
+from .. import parsing as P
+from .base import (BLOCK_PREFIX, DOWN_PREFIX, OURS_RE, SCHED_PREFIX, UP_PREFIX, WAN_NAME_RE, ActionError, Driver,
+                   LoginError, PageMissing, RouterError, hexmac)
 
 
 # feature -> candidate pages, each with a text that must appear in it (None = any page)
@@ -57,59 +38,44 @@ PAGES = {
                ("urlfilter.cmd?action=view", "urlfilter")],
 }
 
-WAN_NAME_RE = re.compile(r"^(ppp|ptm|atm|nas|veip|wan|epon|gpon|ewan)", re.I)
-
-
 def _q(value):
     """Encode a value the way the router's own JavaScript sends it (':' and '.' stay as they are)."""
     return urllib.parse.quote(str(value), safe=":./-_")
 
 
-class Router:
-    def __init__(self, host, username, password, timeout=10, pages=None, params=None, log=None):
-        host = (host or "192.168.1.1").strip().rstrip("/")
-        if not re.match(r"https?://", host):
-            host = "http://" + host
-        self.base = host
-        self.username = username or "admin"
-        self.password = password or ""
-        self.timeout = timeout
-        self.page_overrides = dict(pages or {})
-        self.param_overrides = dict(params or {})
-        self.log = log or (lambda msg: None)
-        self.lock = threading.RLock()
-        self.cookies = http.cookiejar.CookieJar()
-        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.cookies))
-        self.auth_mode = None
-        self._basic = None
+class DLinkBroadcom(Driver):
+    MODEL = "dlink-broadcom"
+    NAME = "D-Link DSL (Broadcom)"
+    EXAMPLES = "DSL-G256DG, DSL-2740B, DSL-2750U and other D-Link DSL routers with the orange-and-black page"
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
         self._login_variant = None
         self.found = {}
-        self.requests = 0
-        self.last_error = ""
+        self._qos_on = None
+        self._block_kind = None
+
+    @classmethod
+    def identify(cls, status, text, headers):
+        t = (text or "").lower()
+        score = 0
+        if "login.cgi" in t:
+            score += 2
+        if "frmlogin" in t:
+            score += 1
+        if "captchaenbl" in t:
+            score += 2
+        if "sessionkey" in t:
+            score += 1
+        if "d-link" in t or re.search(r"\bdsl-\w+", t):
+            score += 2
+        if "micro_httpd" in headers.get("server", "").lower():
+            score += 2
+        if status == 401 and re.search(r"d-?link|dsl", headers.get("www-authenticate", ""), re.I):
+            score += 3
+        return score
 
     # ------------------------------------------------------------------ HTTP
-
-    def _fetch(self, path, form=None):
-        url = path if path.startswith("http") else self.base + "/" + path.lstrip("/")
-        headers = {"User-Agent": "Mozilla/5.0 (dlink-dsl-control)", "Referer": self.base + "/",
-                   "Accept": "text/html,*/*"}
-        if self._basic:
-            headers["Authorization"] = "Basic " + self._basic
-        data = None
-        if form is not None:
-            data = urllib.parse.urlencode(form).encode()
-            headers["Content-Type"] = "application/x-www-form-urlencoded"
-        req = urllib.request.Request(url, data=data, headers=headers)
-        try:
-            with self.opener.open(req, timeout=self.timeout) as r:
-                status, body = r.status, r.read()
-        except urllib.error.HTTPError as e:
-            status, body = e.code, (e.read() or b"")
-            e.close()
-        except (urllib.error.URLError, OSError, socket.timeout) as e:
-            raise RouterError("Cannot reach the router at %s (%s)" % (self.base, getattr(e, "reason", e)))
-        self.requests += 1
-        return status, body.decode("utf-8", "replace")
 
     def _logged_in(self):
         for page in ("info.html", "dhcpinfo.html", "statsifc.html"):
@@ -125,7 +91,7 @@ class Router:
             self.auth_mode = None
             s, t = self._fetch("/")
             if s == 401:
-                self._basic = base64.b64encode(("%s:%s" % (self.username, self.password)).encode()).decode()
+                self._set_basic()
                 s, t = self._fetch("/")
                 if s == 401:
                     self._basic = None
@@ -324,13 +290,168 @@ class Router:
                     out.setdefault(cells[0], (ints[-8], ints[-4]))
         return out
 
+    # ------------------------------------------------------------------ what this router offers
+
+    def capabilities(self):
+        block = self.has("blockmac")
+        kind = self._block_kind
+        if block and kind is None:
+            try:
+                kind = self.blocks()[0]
+            except RouterError:
+                pass
+        return {"devices": self.has("dhcp") or self.has("arp"),
+                "wifi": self.has("stations"),
+                "traffic": self.has("wanstats") or self.has("lanstats"),
+                "speed_limit": self.has("qosform"),
+                "pause": block,
+                "bedtime": block and (kind == "todmngr" or self.has("sched")),
+                "sites": self.has("urlflt")}
+
+    def checks(self):
+        labels = [("qos", "Speed rules list"), ("qosform", "Speed limit form"), ("blockmac", "Block / pause device"),
+                  ("sched", "Schedules (bedtime)"), ("urlflt", "Website blocking"), ("stations", "Wi-Fi device list"),
+                  ("arp", "Address table")]
+        return [(label, self.has(f)) for f, label in labels]
+
+    def warnings(self, has_limits):
+        w = []
+        if self._qos_on is False and has_limits:
+            w.append("QoS is switched off on the router, so speed limits do nothing. Open a device and press Save "
+                     "to switch it on.")
+        if "qosform" not in self.page_overrides and "qosform" in self.found and not self.found["qosform"]:
+            w.append("This router's speed-limit page was not found. Please send the report from the Check page.")
+        return w
+
+    # ------------------------------------------------------------------ speed limits (program level)
+
     @staticmethod
-    def pick_wan(names, preferred=None):
-        if preferred and preferred in names:
-            return preferred
-        wan = [n for n in names if WAN_NAME_RE.match(n)]
-        wan.sort(key=lambda n: (not n.lower().startswith("ppp"), n))
-        return wan[0] if wan else None
+    def _wan_queue(queues):
+        wan = [q for q in queues if "(wan)" in q["text"].lower() or WAN_NAME_RE.match(q["ifc"])]
+        if not wan:
+            wan = [q for q in queues if "wan" in q["text"].lower()]
+        return max(wan, key=lambda q: q["prec"]) if wan else None
+
+    @staticmethod
+    def _down_queue(queues, ifc):
+        if not ifc:
+            return None
+        mine = [q for q in queues if q["ifc"].split(".")[0] == ifc]
+        return max(mine, key=lambda q: q["prec"]) if mine else None
+
+    @staticmethod
+    def _iface(ifaces, want):
+        for i in ifaces:
+            if i.lower() == want.lower():
+                return i
+        if want == "WAN":
+            for i in ifaces:
+                if "routed" in i.lower() or WAN_NAME_RE.match(i):
+                    return i
+        return want
+
+    def apply_limit(self, mac, ip, ifc, up_kbps, down_kbps):
+        """Upload = rule on LAN ingress by source MAC into the internet queue. Download = rule on
+        WAN ingress by destination IP into the device's Wi-Fi queue (or the internet queue)."""
+        h = hexmac(mac)
+        up_name, dn_name = UP_PREFIX + h, DOWN_PREFIX + h
+        with self.lock:
+            q = self.qos()
+            ours = [x["name"] for x in q["rules"] if x["name"] in (up_name, dn_name)]
+            if ours:
+                self.remove_qos_rules(ours)
+            if self.qos_enabled() is False:
+                self.enable_qos()
+            wan_q = self._wan_queue(q["queues"])
+            if not wan_q:
+                raise ActionError("The router has no internet (WAN) queue. Create one under Network Tools → QoS Queue.")
+            errors = []
+            if up_kbps:
+                try:
+                    self.add_qos_rule(up_name, self._iface(q["ifaces"], "LAN"), wan_q, up_kbps, src_mac=mac)
+                except RouterError as e:
+                    errors.append("upload: %s" % e)
+            if down_kbps:
+                if not ip:
+                    errors.append("download: the device has no address right now; it is set when it comes online")
+                else:
+                    dq = self._down_queue(q["queues"], ifc) or wan_q
+                    try:
+                        self.add_qos_rule(dn_name, self._iface(q["ifaces"], "WAN"), dq, down_kbps, dst_ip=ip,
+                                          ethertype="800")
+                    except RouterError as e:
+                        errors.append("download: %s" % e)
+            return errors
+
+    def clear_limit(self, mac):
+        h = hexmac(mac)
+        with self.lock:
+            names = [x["name"] for x in self.qos()["rules"] if x["name"] in (UP_PREFIX + h, DOWN_PREFIX + h)]
+            self.remove_qos_rules(names)
+
+    def limit_overview(self):
+        try:
+            rules = self.qos()["rules"]
+        except PageMissing:
+            return {}, []
+        state, other = {}, []
+        for r in rules:
+            n = r["name"]
+            if re.fullmatch(r"r[ud][0-9a-f]{12}", n):
+                mac = ":".join(n[i:i + 2] for i in range(2, 14, 2))
+                state.setdefault(mac, {"up": False, "down": False})["up" if n[1] == "u" else "down"] = True
+            elif not OURS_RE.match(n):
+                other.append({"name": n, "src_mac": r.get("src_mac", ""), "dst_ip": r.get("dst_ip", ""),
+                              "rate": r.get("rate", ""), "enabled": r.get("enabled")})
+        return state, other
+
+    # ------------------------------------------------------------------ blocking (program level)
+
+    def apply_block(self, mac, windows=None):
+        h = hexmac(mac)
+        with self.lock:
+            self.clear_block(mac)
+            kind, _ = self.blocks()
+            entries = []
+            if windows is None:
+                name = BLOCK_PREFIX + h
+                if kind == "blockmac":
+                    self.add_block(name, mac, "Always")
+                else:
+                    self.add_block(name, mac, days=127, start=0, end=1439)
+                entries.append(name)
+            else:
+                for i, (ws, we, wd) in enumerate(windows):
+                    name = BLOCK_PREFIX + h + ("" if i == 0 else "b")
+                    if kind == "blockmac":
+                        sched = "%s%02d%02d%02d%02dd%d" % (SCHED_PREFIX, ws // 60, ws % 60, we // 60, we % 60, wd)
+                        if sched not in {x["name"] for x in self.schedules()}:
+                            self.add_schedule(sched, wd, ws, we)
+                        self.add_block(name, mac, sched)
+                    else:
+                        self.add_block(name, mac, days=wd, start=ws, end=we)
+                    entries.append(name)
+            return entries
+
+    def clear_block(self, mac):
+        h = hexmac(mac)
+        with self.lock:
+            _, entries = self.blocks()
+            mine = [e["name"] for e in entries if e["name"] in (BLOCK_PREFIX + h, BLOCK_PREFIX + h + "b")]
+            self.remove_blocks(mine)
+            if self.has("sched"):
+                _, left = self.blocks()
+                used = {e.get("schedule") for e in left}
+                unused = [s["name"] for s in self.schedules() if s["name"].startswith(SCHED_PREFIX)
+                          and s["name"] not in used and re.fullmatch(r"rc\d{8}d\d+", s["name"])]
+                if unused:
+                    self.remove_schedules(unused)
+
+    def block_names(self):
+        try:
+            return [e["name"] for e in self.blocks()[1]]
+        except PageMissing:
+            return []
 
     # ------------------------------------------------------------------ QoS
 
@@ -453,9 +574,11 @@ class Router:
             return None
         v = P.js_vars(t)
         if "enblQos" in v:
-            return v["enblQos"] == "1"
+            self._qos_on = v["enblQos"] == "1"
+            return self._qos_on
         m = re.search(r"""(?i)<input[^>]*name=['"]?enableQos['"]?[^>]*>""", t)
-        return bool(m and "checked" in m.group(0).lower()) if m else None
+        self._qos_on = bool(m and "checked" in m.group(0).lower()) if m else None
+        return self._qos_on
 
     def enable_qos(self):
         with self.lock:
@@ -478,6 +601,7 @@ class Router:
         """(kind, [{'name','mac','schedule'|days/start/end}]); kind is 'blockmac' or 'todmngr'."""
         t = self.fetch("blockmac")
         kind = "blockmac" if "blockmac.tod" in t else "todmngr"
+        self._block_kind = kind
         v = P.js_vars(t)
         entries = []
         if "macs" in v:
@@ -624,4 +748,39 @@ class Router:
             except RouterError as e:
                 entry["error"] = str(e)
             out["features"][feature] = entry
+        return out
+
+    def report_lines(self):
+        out = []
+        add = out.append
+        add("QoS on: %s   Block type: %s" % (self._qos_on, self._block_kind))
+        add("")
+        add("== QoS ==")
+        try:
+            q = self.qos()
+            add("Interfaces: %s" % " | ".join(q["ifaces"]))
+            add("Queues: %s" % " | ".join("%s=%s" % (x["key"], x["text"]) for x in q["queues"]))
+            add("Rule order 'Last' value: %s   rate field shown: %s" % (q["order_last"], q["tc_enabled"]))
+            for x in q["rules"]:
+                add("  rule %s intf=%s src=%s dst=%s queue=%s rate=%s on=%s" % (
+                    x["name"], x.get("intf"), x.get("src_mac"), x.get("dst_ip"), x.get("queue_key"), x.get("rate"),
+                    x.get("enabled")))
+            t, spec, key = self.qos_form()
+            if spec:
+                add("Add-rule script (from the router page):")
+                add(spec.source[:3000])
+        except RouterError as e:
+            add("QoS read failed: %s" % e)
+        for feature, marker in (("blockmac", ".tod?action=add"), ("sched", "sciptsched.sched?action=add"),
+                                ("urlflt", "urlfilter.cmd?action=add")):
+            try:
+                t = self.fetch(feature)
+                spec = P.form_spec(t, "blockmac.tod?action=add" if feature == "blockmac" and "blockmac.tod" in t else
+                                   ("todmngr.tod" if feature == "blockmac" else marker))
+                if spec:
+                    add("")
+                    add("%s script:" % feature)
+                    add(spec.source[:1500])
+            except RouterError:
+                pass
         return out

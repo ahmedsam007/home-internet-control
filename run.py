@@ -1,7 +1,8 @@
-"""Start D-Link DSL Control:  python run.py   (or double-click start-windows.bat / start-mac.command)
+"""Start Home Internet Control:  python run.py   (or double-click start-windows.bat / start-mac.command)
 
 Options:
-  --demo      try it with a fake router (nothing on your network is touched)
+  --demo      try it with a fake D-Link router (nothing on your network is touched)
+  --demo vtech  the same with a fake Bezeq VTech NB403-IL (early support: devices only)
   --lan       let phones and other computers in the house open the page too
   --port N    use another port for the page (default 8770)
   --no-open   do not open the browser
@@ -55,21 +56,24 @@ def demo_setup(app, state):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="D-Link DSL Control")
-    ap.add_argument("--demo", action="store_true")
+    ap = argparse.ArgumentParser(description="Home Internet Control")
+    ap.add_argument("--demo", nargs="?", const="dlink", choices=["dlink", "vtech"])
     ap.add_argument("--lan", action="store_true")
     ap.add_argument("--port", type=int)
     ap.add_argument("--no-open", action="store_true")
     a = ap.parse_args()
 
     if a.demo:
-        from tools.mock_router import serve
+        if a.demo == "vtech":
+            from tools.mock_vtech import serve
+        else:
+            from tools.mock_router import serve
         srv, state = serve(0)
         mock_port = srv.server_address[1]
         cfg = load_config(os.path.join(ROOT, "no-such-config.json"))
         cfg["router"] = {"host": "127.0.0.1:%d" % mock_port, "username": "admin", "password": "admin"}
         cfg["internet_ping"] = "1.1.1.1"
-        data_dir = os.path.join(tempfile.gettempdir(), "dlink-dsl-control-demo-%d" % os.getpid())
+        data_dir = os.path.join(tempfile.gettempdir(), "home-internet-control-demo-%d" % os.getpid())
         config_path = None
         ctl = Controller(cfg, data_dir, fake_ping=True)
     else:
@@ -78,7 +82,7 @@ def main():
         ctl = Controller(cfg, os.path.join(ROOT, "data"))
 
     app = App(ctl, config_path, lan=a.lan)
-    if a.demo:
+    if a.demo == "dlink":
         demo_setup(app, state)
     port = a.port or int(cfg.get("port", 8770))
     try:
@@ -87,7 +91,7 @@ def main():
         sys.exit("Port %d is busy — is the program already running? Close the other window, or use --port 8771." % port)
     ctl.start()
     url = "http://127.0.0.1:%d/" % port
-    print("D-Link DSL Control%s is running." % (" (DEMO, fake router)" if a.demo else ""))
+    print("Home Internet Control%s is running." % (" (DEMO, fake router)" if a.demo else ""))
     print("Open %s in your browser. Close this window to stop it." % url)
     if not a.no_open:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()

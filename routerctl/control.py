@@ -6,18 +6,11 @@ import re
 import threading
 import time
 
+from . import drivers
 from . import parsing as P
+from .drivers import ActionError, PageMissing, RouterError
+from .drivers.base import DOWN_PREFIX, UP_PREFIX, hexmac
 from .monitor import Pinger, Traffic
-from .router import ActionError, PageMissing, Router, RouterError, WAN_NAME_RE
-
-# Names this program gives the router entries it creates. Anything else on the
-# router (rules someone made by hand) is shown but never changed.
-UP_PREFIX, DOWN_PREFIX, BLOCK_PREFIX, SCHED_PREFIX = "ru", "rd", "bk", "rc"
-OURS_RE = re.compile(r"^r[ud][0-9a-f]{12}$")
-
-
-def hexmac(mac):
-    return mac.replace(":", "").lower()
 
 
 def hhmm_to_min(s):
@@ -76,13 +69,17 @@ class Controller:
         self.pinger = Pinger(fake=fake_ping)
         self.traffic = Traffic()
         self.status = {"configured": False, "connected": False, "error": "", "info": {}, "warnings": [],
-                       "last_ok": None, "qos_on": None, "clock_ok": None, "block_kind": None}
+                       "last_ok": None, "clock_ok": None, "model": "", "model_name": ""}
         self.router = None
         self.devices = {}
-        self.rules = []
+        self.limit_state = {}       # mac -> {'up': bool, 'down': bool} for our limits on the router
+        self.other_rules = []       # limit rules made by hand in the router
         self.block_entries = []
         self.sites = []
-        self.features = {}
+        self.caps = {}
+        self.checks = []
+        self.save_config = lambda: None   # the App replaces this to write config.json
+        self.connect_lock = threading.Lock()
         self.action_lock = threading.RLock()
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -91,15 +88,55 @@ class Controller:
 
     # ------------------------------------------------------------------ setup
 
-    def reconfigure(self, config):
+    def _driver_args(self):
+        rc = self.cfg.get("router", {})
+        return (rc.get("host", "192.168.1.1"), rc.get("username", "admin"), rc.get("password", "")), \
+            {"pages": self.cfg.get("pages"), "params": self.cfg.get("params"), "log": self.log}
+
+    def model(self):
+        """The model in use: the one chosen in Settings, or the one auto-detect found."""
+        m = self.cfg.get("model") or "auto"
+        if m == "auto":
+            m = self.cfg.get("detected_model") or ""
+        return m if m in drivers.MODELS else ""
+
+    def reconfigure(self, config, router=None):
+        """`router` = a driver that is already logged in (from Settings), to skip a second detection."""
         self.cfg = config
         rc = config.get("router", {})
         self.status["configured"] = bool(rc.get("password"))
-        self.router = Router(rc.get("host", "192.168.1.1"), rc.get("username", "admin"), rc.get("password", ""),
-                             pages=config.get("pages"), params=config.get("params"), log=self.log) \
-            if self.status["configured"] else None
+        self.router = None
+        self.caps, self.checks = {}, []
+        if self.status["configured"]:
+            if router is not None:
+                self.router = router
+            elif self.model():
+                args, kw = self._driver_args()
+                self.router = drivers.make(self.model(), *args, **kw)
+        self._set_model()
         self.traffic = Traffic()
         self._wake.set()
+
+    def _set_model(self):
+        m = self.router.MODEL if self.router else self.model()
+        self.status["model"] = m
+        self.status["model_name"] = drivers.model_name(m)
+
+    def _connect(self):
+        """The driver to use, auto-detecting the model the first time. None when not set up."""
+        r = self.router
+        if r is not None or not self.status["configured"]:
+            return r
+        with self.connect_lock:
+            if self.router is None:
+                args, kw = self._driver_args()
+                r = drivers.detect(*args, timeout=10, **kw)
+                self.cfg["detected_model"] = r.MODEL
+                self.router = r
+                self._set_model()
+                self.log("router recognised as %s" % r.NAME)
+                self.save_config()
+        return self.router
 
     def log(self, msg):
         line = "%s  %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -139,12 +176,12 @@ class Controller:
     def _traffic_loop(self):
         while not self._stop.is_set():
             r = self.router
-            if r is None:
+            if r is None or not self.caps.get("traffic"):
                 self._sleep(5)
                 continue
             try:
                 counters = r.counters()
-                wan = Router.pick_wan(list(counters), self.cfg.get("wan_interface"))
+                wan = r.pick_wan(list(counters), self.cfg.get("wan_interface"))
                 self.traffic.update(counters, wan)
                 self.status.update(connected=True, error="", last_ok=time.time())
                 u = self.store.data["usage"]
@@ -162,10 +199,10 @@ class Controller:
     def _devices_loop(self):
         n = 0
         while not self._stop.is_set():
-            if self.router is None:
-                self._sleep(5)
-                continue
             try:
+                if self._connect() is None:
+                    self._sleep(5)
+                    continue
                 self.refresh(slow=(n % 6 == 0))
                 self.reconcile()
                 n += 1
@@ -187,27 +224,26 @@ class Controller:
     # ------------------------------------------------------------------ reading
 
     def refresh(self, slow=True):
-        r = self.router
-        leases = r.leases()
+        r = self._connect()
+        if slow or not self.caps:
+            self.caps = r.capabilities()
+        try:
+            leases = r.leases()
+        except PageMissing:
+            leases = []
         stations = r.stations()
-        arp = r.arp() if r.has("arp") else []
-        try:
-            self.rules = r.qos()["rules"]
-        except PageMissing:
-            self.rules = []
-        try:
-            self.status["block_kind"], self.block_entries = r.blocks()
-        except PageMissing:
-            self.block_entries = []
+        arp = r.arp()
+        self.limit_state, self.other_rules = r.limit_overview()
+        self.block_entries = r.block_names()
         if slow:
             self.status["info"] = r.info()
-            self.status["qos_on"] = r.qos_enabled()
+            r.qos_enabled()
             self.status["clock_ok"] = r.clock_set()
             try:
                 self.sites = r.sites()
             except PageMissing:
                 self.sites = None
-            self.features = {f: r.has(f) for f in ("qos", "qosform", "blockmac", "sched", "urlflt", "stations", "arp")}
+            self.checks = r.checks()
         self._merge(leases, stations, arp)
         self.status.update(connected=True, error="", last_ok=time.time())
         self._warnings()
@@ -238,7 +274,7 @@ class Controller:
                 k["link"] = "wifi"
                 k["ifc"] = ifc
                 k["band"] = band.get(ifc, ifc)
-            elif pinged and self.features.get("stations", True):
+            elif pinged and self.caps.get("wifi", True):
                 k["link"] = "wired"
                 k["ifc"] = ""
             if online:
@@ -253,34 +289,30 @@ class Controller:
         self.devices = devices
 
     def _warnings(self):
-        w = []
-        if self.status["qos_on"] is False and self.store.data["limits"]:
-            w.append("QoS is switched off on the router, so speed limits do nothing. Open a device and press Save to switch it on.")
+        w = list(self.router.warnings(bool(self.store.data["limits"]))) if self.router else []
         if self.status["clock_ok"] is False:
             w.append("The router's clock is not set. Bedtime blocks only work when it is (router: Setup → Time and Date).")
-        if self.features and not self.features.get("qosform"):
-            w.append("This router's speed-limit page was not found. Please send the report from the Check page.")
+        if self.caps and not self.caps.get("devices"):
+            w.append("This program cannot read this router's device list yet. Please send the report from the Check page.")
         self.status["warnings"] = w
 
     def device_view(self, mac):
         d = dict(self.devices.get(mac) or {"mac": mac, "name": self.store.data["names"].get(mac, "")})
         h = hexmac(mac)
-        rules = {r["name"]: r for r in self.rules}
         lim = self.store.data["limits"].get(mac)
         if lim:
-            want = []
-            if lim.get("up_applied"):
-                want.append(UP_PREFIX + h)
-            if lim.get("method") == "router" and lim.get("down"):
-                want.append(DOWN_PREFIX + h)
-            missing = [n for n in want if n not in rules]
+            have = self.limit_state.get(mac, {})
+            missing = []
+            if lim.get("up_applied") and not have.get("up"):
+                missing.append(UP_PREFIX + h)
+            if lim.get("method") == "router" and lim.get("down") and not have.get("down"):
+                missing.append(DOWN_PREFIX + h)
             d["limit"] = dict(lim, on_router=not missing, missing=missing)
         blk = self.store.data["blocks"].get(mac)
-        names = {e["name"] for e in self.block_entries}
+        names = set(self.block_entries)
         if blk:
             d["block"] = dict(blk, on_router=all(n in names for n in blk.get("entries", [])))
-        other = [r for r in self.rules if (r.get("src_mac") == mac or (d.get("ip") and r.get("dst_ip") == d.get("ip")))
-                 and not r["name"].startswith((UP_PREFIX + h, DOWN_PREFIX + h))]
+        other = [r for r in self.other_rules if r.get("src_mac") == mac or (d.get("ip") and r.get("dst_ip") == d.get("ip"))]
         if other:
             d["other_rules"] = [r["name"] for r in other]
         return d
@@ -293,41 +325,19 @@ class Controller:
 
     # ------------------------------------------------------------------ helpers
 
-    def _need_router(self):
-        if self.router is None:
+    def _need_router(self, cap=None):
+        if not self.status["configured"]:
             raise ActionError("Set the router password first (Settings).")
-        return self.router
+        r = self._connect()
+        if cap and self.caps and not self.caps.get(cap):
+            raise drivers.NotSupported("This router (%s) does not support that yet." % r.NAME)
+        return r
 
     def _device(self, mac):
         mac = P.norm_mac(mac)
         if not P.is_mac(mac):
             raise ActionError("Not a device address: %s" % mac)
         return mac, self.devices.get(mac) or {}
-
-    @staticmethod
-    def _wan_queue(queues):
-        wan = [q for q in queues if "(wan)" in q["text"].lower() or WAN_NAME_RE.match(q["ifc"])]
-        if not wan:
-            wan = [q for q in queues if "wan" in q["text"].lower()]
-        return max(wan, key=lambda q: q["prec"]) if wan else None
-
-    @staticmethod
-    def _down_queue(queues, ifc):
-        if not ifc:
-            return None
-        mine = [q for q in queues if q["ifc"].split(".")[0] == ifc]
-        return max(mine, key=lambda q: q["prec"]) if mine else None
-
-    @staticmethod
-    def _iface(ifaces, want):
-        for i in ifaces:
-            if i.lower() == want.lower():
-                return i
-        if want == "WAN":
-            for i in ifaces:
-                if "routed" in i.lower() or WAN_NAME_RE.match(i):
-                    return i
-        return want
 
     def download_method(self, dev):
         m = self.cfg.get("download_method", "auto")
@@ -369,46 +379,20 @@ class Controller:
             raise ActionError("That limit is too low; use at least 64 kbit/s down and 32 kbit/s up.")
         if not down and not up:
             return self.remove_limit(mac)
-        r = self._need_router()
+        r = self._need_router("speed_limit")
         with self.action_lock:
-            h = hexmac(mac)
-            up_name, dn_name = UP_PREFIX + h, DOWN_PREFIX + h
-            q = r.qos()
-            ours = [x["name"] for x in q["rules"] if x["name"] in (up_name, dn_name)]
-            if ours:
-                r.remove_qos_rules(ours)
-            if r.qos_enabled() is False:
-                r.enable_qos()
-                self.status["qos_on"] = True
-            wan_q = self._wan_queue(q["queues"])
-            if not wan_q:
-                raise ActionError("The router has no internet (WAN) queue. Create one under Network Tools → QoS Queue.")
             method = method or self.download_method(dev)
             up_eff = up
             if down and method == "upload_trick":
                 up_eff = min(up or 10 ** 9, max(50, down // 12))
-            rec = {"down": down, "up": up, "method": method, "up_applied": up_eff, "ip": dev.get("ip", ""),
-                   "set_at": time.time()}
-            self.store.data["limits"][mac] = rec
+            errors = r.apply_limit(mac, dev.get("ip", ""), dev.get("ifc", ""), up_eff,
+                                   down if method == "router" else 0)
+            self.store.data["limits"][mac] = {"down": down, "up": up, "method": method, "up_applied": up_eff,
+                                              "ip": dev.get("ip", ""), "set_at": time.time()}
             self.store.save()
-            errors = []
-            if up_eff:
-                try:
-                    r.add_qos_rule(up_name, self._iface(q["ifaces"], "LAN"), wan_q, up_eff, src_mac=mac)
-                except RouterError as e:
-                    errors.append("upload: %s" % e)
-            if down and method == "router":
-                if not dev.get("ip"):
-                    errors.append("download: the device has no address right now; it is set when it comes online")
-                else:
-                    dq = self._down_queue(q["queues"], dev.get("ifc")) or wan_q
-                    try:
-                        r.add_qos_rule(dn_name, self._iface(q["ifaces"], "WAN"), dq, down, dst_ip=dev["ip"], ethertype="800")
-                    except RouterError as e:
-                        errors.append("download: %s" % e)
             self.log("limit %s (%s): down %s up %s via %s%s" % (dev.get("name") or mac, mac, down, up_eff, method,
                                                                  (" — " + "; ".join(errors)) if errors else ""))
-            self.rules = r.qos()["rules"]
+            self.limit_state, self.other_rules = r.limit_overview()
             if errors:
                 raise ActionError("; ".join(errors))
             return self.device_view(mac)
@@ -417,77 +401,42 @@ class Controller:
         mac, dev = self._device(mac)
         r = self._need_router()
         with self.action_lock:
-            h = hexmac(mac)
-            names = [x["name"] for x in r.qos()["rules"] if x["name"] in (UP_PREFIX + h, DOWN_PREFIX + h)]
-            r.remove_qos_rules(names)
+            r.clear_limit(mac)
             self.store.data["limits"].pop(mac, None)
             self.store.save()
-            self.rules = r.qos()["rules"]
+            self.limit_state, self.other_rules = r.limit_overview()
             self.log("limit removed for %s (%s)" % (dev.get("name") or mac, mac))
             return self.device_view(mac)
 
     def block(self, mac, mode="pause", start=None, end=None, days=127):
         """mode 'pause' = no internet until unblocked; 'bedtime' = no internet between start and end."""
         mac, dev = self._device(mac)
-        r = self._need_router()
+        if mode == "pause":
+            r = self._need_router("pause")
+            wins, rec = None, {"mode": "pause"}
+        elif mode == "bedtime":
+            r = self._need_router("bedtime")
+            days = int(days) & 127 or 127
+            wins = windows(hhmm_to_min(start), hhmm_to_min(end), days)
+            rec = {"mode": "bedtime", "start": start, "end": end, "days": days}
+        else:
+            raise ActionError("Unknown block type")
         with self.action_lock:
-            self._remove_block_entries(mac)
-            kind, _ = r.blocks()
-            h = hexmac(mac)
-            entries = []
-            if mode == "pause":
-                name = BLOCK_PREFIX + h
-                if kind == "blockmac":
-                    r.add_block(name, mac, "Always")
-                else:
-                    r.add_block(name, mac, days=127, start=0, end=1439)
-                entries.append(name)
-                rec = {"mode": "pause"}
-            elif mode == "bedtime":
-                days = int(days) & 127 or 127
-                s, e = hhmm_to_min(start), hhmm_to_min(end)
-                for i, (ws, we, wd) in enumerate(windows(s, e, days)):
-                    name = BLOCK_PREFIX + h + ("" if i == 0 else "b")
-                    if kind == "blockmac":
-                        sched = "%s%02d%02d%02d%02dd%d" % (SCHED_PREFIX, ws // 60, ws % 60, we // 60, we % 60, wd)
-                        if sched not in {x["name"] for x in r.schedules()}:
-                            r.add_schedule(sched, wd, ws, we)
-                        r.add_block(name, mac, sched)
-                    else:
-                        r.add_block(name, mac, days=wd, start=ws, end=we)
-                    entries.append(name)
-                rec = {"mode": "bedtime", "start": start, "end": end, "days": days}
-            else:
-                raise ActionError("Unknown block type")
-            rec.update(entries=entries, set_at=time.time())
+            rec.update(entries=r.apply_block(mac, wins), set_at=time.time())
             self.store.data["blocks"][mac] = rec
             self.store.save()
-            self.status["block_kind"], self.block_entries = r.blocks()
+            self.block_entries = r.block_names()
             self.log("block %s (%s): %s" % (dev.get("name") or mac, mac, rec))
             return self.device_view(mac)
 
-    def _remove_block_entries(self, mac):
-        r = self.router
-        h = hexmac(mac)
-        _, entries = r.blocks()
-        mine = [e["name"] for e in entries if e["name"] in (BLOCK_PREFIX + h, BLOCK_PREFIX + h + "b")]
-        r.remove_blocks(mine)
-        if r.has("sched"):
-            _, left = r.blocks()
-            used = {e.get("schedule") for e in left}
-            unused = [s["name"] for s in r.schedules() if s["name"].startswith(SCHED_PREFIX) and s["name"] not in used
-                      and re.fullmatch(r"rc\d{8}d\d+", s["name"])]
-            if unused:
-                r.remove_schedules(unused)
-
     def unblock(self, mac):
         mac, dev = self._device(mac)
-        self._need_router()
+        r = self._need_router()
         with self.action_lock:
-            self._remove_block_entries(mac)
+            r.clear_block(mac)
             self.store.data["blocks"].pop(mac, None)
             self.store.save()
-            self.status["block_kind"], self.block_entries = self.router.blocks()
+            self.block_entries = r.block_names()
             self.log("unblocked %s (%s)" % (dev.get("name") or mac, mac))
             return self.device_view(mac)
 
@@ -495,7 +444,7 @@ class Controller:
         url = re.sub(r"^https?://", "", (url or "").strip()).split("/")[0].lower()
         if not re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", url):
             raise ActionError("Write a website like example.com")
-        r = self._need_router()
+        r = self._need_router("sites")
         with self.action_lock:
             r.add_site(url)
             self.sites = r.sites()
@@ -536,7 +485,6 @@ class Controller:
                        "wifi": sum(1 for d in devs if d["online"] and d["link"] == "wifi"),
                        "wired": sum(1 for d in devs if d["online"] and d["link"] == "wired"),
                        "limited": len(self.store.data["limits"]), "blocked": len(self.store.data["blocks"])},
-            "usage": self.store.data["usage"], "features": self.features, "sites": self.sites,
-            "selftest": self.store.data["selftest"],
-            "other_rules": [r for r in self.rules if not OURS_RE.match(r["name"])],
+            "usage": self.store.data["usage"], "caps": self.caps, "checks": self.checks, "sites": self.sites,
+            "selftest": self.store.data["selftest"], "other_rules": self.other_rules,
         }

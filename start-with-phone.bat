@@ -1,5 +1,5 @@
 @echo off
-rem Double-click to start D-Link DSL Control AND let phones on the home Wi-Fi use it.
+rem Double-click to start Home Internet Control AND let phones on the home Wi-Fi use it.
 rem The first time, Windows may ask to allow Python on the network: choose "Allow" (Private networks).
 cd /d "%~dp0"
 set "PY="

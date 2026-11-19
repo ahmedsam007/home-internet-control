@@ -11,9 +11,11 @@ sys.path.insert(0, ROOT)
 from routerctl import parsing as P  # noqa: E402
 from routerctl import report  # noqa: E402
 from routerctl.control import Controller, next_day, windows  # noqa: E402
-from routerctl.router import LoginError, Router  # noqa: E402
+from routerctl.drivers import LoginError, DLinkBroadcom, VTechNB403, detect  # noqa: E402
 from routerctl.server import load_config  # noqa: E402
 from tools.mock_router import serve  # noqa: E402
+from tools import mock_vtech  # noqa: E402
+from routerctl import drivers  # noqa: E402
 from routerctl.qr import QR  # noqa: E402
 from routerctl.server import App, make_server  # noqa: E402
 import json  # noqa: E402
@@ -84,7 +86,7 @@ class AgainstFakeRouter(unittest.TestCase):
 
     def test_wrong_password(self):
         with self.assertRaises(LoginError):
-            Router(self.host, "admin", "nope").login()
+            DLinkBroadcom(self.host, "admin", "nope").login()
 
     def test_devices(self):
         c = self.ctl()
@@ -167,7 +169,7 @@ class PhoneAccess(unittest.TestCase):
 
     def call(self, path, body=None, cookie="", host=None):
         req = urllib.request.Request(self.base + path, data=None if body is None else json.dumps(body).encode(),
-                                     headers={"X-Requested-With": "dlink-dsl-control", "Cookie": cookie})
+                                     headers={"X-Requested-With": "home-internet-control", "Cookie": cookie})
         if host:
             req.add_header("Host", host)
         try:
@@ -213,6 +215,110 @@ class PhoneAccess(unittest.TestCase):
     def test_qr_svg(self):
         svg = QR("http://192.168.1.4:8770/#pin=123456").svg()
         self.assertTrue(svg.startswith("<svg") and "path" in svg)
+
+
+class Models(unittest.TestCase):
+    """Telling routers apart, and the VTech early-support driver."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dlink, cls.dstate = serve(0)
+        cls.vtech, cls.vstate = mock_vtech.serve(0)
+        cls.dhost = "127.0.0.1:%d" % cls.dlink.server_address[1]
+        cls.vhost = "127.0.0.1:%d" % cls.vtech.server_address[1]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.dlink.shutdown()
+        cls.vtech.shutdown()
+
+    def ctl(self, host, model="auto"):
+        cfg = load_config("/nonexistent.json")
+        cfg["router"] = {"host": host, "username": "admin", "password": "admin"}
+        cfg["model"] = model
+        c = Controller(cfg, tempfile.mkdtemp(), fake_ping=True)
+        c.refresh()
+        return c
+
+    def test_detect_each_router(self):
+        self.assertIsInstance(detect(self.dhost, "admin", "admin"), DLinkBroadcom)
+        self.assertIsInstance(detect(self.vhost, "admin", "admin"), VTechNB403)
+
+    def test_recognised_router_wrong_password_is_clear(self):
+        with self.assertRaises(LoginError) as e:
+            detect(self.vhost, "admin", "wrong")
+        self.assertIn("password", str(e.exception))
+
+    def test_unrecognised_front_page_tries_each_driver(self):
+        ranked = drivers.rank(200, "<html>hello</html>", {})
+        self.assertEqual([s for _, s in ranked], [0, 0])
+        self.assertEqual(ranked[0][0], DLinkBroadcom, "keeps the list order when nothing matches")
+
+    def test_dlink_capabilities(self):
+        c = self.ctl(self.dhost)
+        self.assertEqual(c.status["model"], "dlink-broadcom")
+        self.assertEqual(c.cfg["detected_model"], "dlink-broadcom")
+        self.assertTrue(all(c.caps.values()), c.caps)
+
+    def test_vtech_devices_read_only(self):
+        self.vstate.requested.clear()
+        c = self.ctl(self.vhost)
+        self.assertEqual(c.status["model"], "vtech-nb403")
+        self.assertTrue(c.caps["devices"])
+        self.assertFalse(c.caps["speed_limit"] or c.caps["pause"] or c.caps["sites"] or c.caps["traffic"])
+        self.assertEqual({d["mac"] for d in c.devices.values()}, {d["mac"] for d in mock_vtech.DEVICES})
+        self.assertEqual(c.devices["a4:83:e7:30:40:02"]["hostname"], "Phone-B")
+        self.assertEqual(c.status["info"].get("firmware"), "BZ_2.02.07.09.13.01")
+        asked = set(self.vstate.requested)
+        for bad in ("/reboot.cgi", "/logout.html", "/reset.html", "/goform/save_lan", "/goform/wifi"):
+            self.assertNotIn(bad, asked, "must never open " + bad)
+        self.assertIn("/wifi.html", asked, "follows links found in scripts")
+        self.assertEqual([r for r in self.vstate.requested if r.startswith("POST")], ["POST /goform/login"])
+
+    def test_vtech_refuses_unsupported_actions(self):
+        c = self.ctl(self.vhost)
+        with self.assertRaises(drivers.NotSupported):
+            c.set_limit("a4:83:e7:30:40:02", 2000, 500)
+        with self.assertRaises(drivers.NotSupported):
+            c.block("a4:83:e7:30:40:02", "pause")
+        with self.assertRaises(drivers.NotSupported):
+            c.add_site("example.com")
+
+    def test_vtech_report(self):
+        c = self.ctl(self.vhost)
+        text = report.build(c)
+        self.assertIn("Router pages", text)
+        self.assertIn("/lan.html", text)
+        self.assertIn("loginPass(password)", text)
+        self.assertNotIn("a4:83:e7:30", text)
+
+    def test_vtech_report_when_login_fails(self):
+        cfg = load_config("/nonexistent.json")
+        cfg["router"] = {"host": self.vhost, "username": "admin", "password": "wrong-pass"}
+        c = Controller(cfg, tempfile.mkdtemp(), fake_ping=True)
+        with self.assertRaises(LoginError):
+            c.refresh()
+        text = report.build(c)
+        self.assertIn("vtech-nb403=", text)
+        self.assertIn("loginPass(password)", text)
+        self.assertNotIn("wrong-pass", text)
+
+    def test_chosen_model_skips_detection(self):
+        c = self.ctl(self.dhost, model="dlink-broadcom")
+        self.assertIsInstance(c.router, DLinkBroadcom)
+        self.assertNotIn("detected_model", {k for k, v in c.cfg.items() if v})
+
+    def test_settings_save_detects_and_reports_model(self):
+        cfg = load_config("/nonexistent.json")
+        c = Controller(cfg, tempfile.mkdtemp(), fake_ping=True)
+        app = App(c, None)
+        code, out = app.save_settings({"host": self.vhost, "username": "admin", "password": "admin", "model": "auto"})
+        self.assertEqual(code, 200, out)
+        self.assertEqual(out["model"], "vtech-nb403")
+        self.assertEqual(out["settings"]["detected"], "vtech-nb403")
+        self.assertEqual({m["id"] for m in out["settings"]["models"]}, {"dlink-broadcom", "vtech-nb403"})
+        code, out = app.save_settings({"model": "no-such-router"})
+        self.assertEqual(code, 400)
 
 
 if __name__ == "__main__":

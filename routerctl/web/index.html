@@ -117,6 +117,11 @@ textarea{width:100%;min-height:220px;font:12px/1.4 ui-monospace,Menlo,Consolas,m
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100vw - 32px)}
 .toast.show{opacity:1}
 .hidden{display:none!important}
+/* parts of the page the connected router does not support */
+.no-traffic .need-traffic,.no-sites .need-sites,.no-speed_limit .need-speed_limit,
+.no-speed_limit.no-pause .need-control{display:none!important}
+.no-traffic .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+.model{font-size:14px;margin:0 0 10px}
 #lock{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
 #lock .box{width:min(340px,100%);text-align:center}
 #lock img{width:64px;height:64px;border-radius:14px}
@@ -157,7 +162,7 @@ ol.how{margin:6px 0 0;padding-left:20px;font-size:14px;color:var(--muted)} ol.ho
     <span class="conn"><span class="dot" id="connDot"></span><span id="connText">Starting…</span></span>
     <nav id="nav">
       <button data-tab="home" class="on">Home</button>
-      <button data-tab="sites">Websites</button>
+      <button data-tab="sites" class="need-sites">Websites</button>
       <button data-tab="check">Check</button>
       <button data-tab="settings">Settings</button>
     </nav>
@@ -167,12 +172,12 @@ ol.how{margin:6px 0 0;padding-left:20px;font-size:14px;color:var(--muted)} ol.ho
   <!-- HOME -->
   <section id="tab-home">
     <div class="tiles">
-      <div class="tile"><div class="k">Download now</div><div class="v" id="tDown">–</div><div class="s" id="tDownS">&nbsp;</div></div>
-      <div class="tile"><div class="k">Upload now</div><div class="v" id="tUp">–</div><div class="s" id="tUpS">&nbsp;</div></div>
+      <div class="tile need-traffic"><div class="k">Download now</div><div class="v" id="tDown">–</div><div class="s" id="tDownS">&nbsp;</div></div>
+      <div class="tile need-traffic"><div class="k">Upload now</div><div class="v" id="tUp">–</div><div class="s" id="tUpS">&nbsp;</div></div>
       <div class="tile"><div class="k">Internet ping</div><div class="v" id="tPing">–</div><div class="s" id="tPingS">&nbsp;</div></div>
       <div class="tile"><div class="k">Devices online</div><div class="v" id="tDev">–</div><div class="s" id="tDevS">&nbsp;</div></div>
     </div>
-    <div class="card">
+    <div class="card need-traffic">
       <h2>Internet speed <span class="sp"></span>
         <span class="legend"><span><i style="background:var(--down)"></i>Download</span><span><i style="background:var(--up)"></i>Upload</span></span>
         <span class="seg" id="range"><button data-s="600" class="on">10 min</button><button data-s="3600">1 h</button></span>
@@ -185,7 +190,7 @@ ol.how{margin:6px 0 0;padding-left:20px;font-size:14px;color:var(--muted)} ol.ho
       <h2>Devices <span class="sp"></span><span class="hint" id="devHint"></span></h2>
       <div class="tools" style="margin-bottom:6px">
         <input type="search" id="q" placeholder="Search name, address…">
-        <span class="seg" id="filter"><button data-f="online" class="on">Online</button><button data-f="all">All</button><button data-f="ctl">Limited / blocked</button></span>
+        <span class="seg" id="filter"><button data-f="online" class="on">Online</button><button data-f="all">All</button><button data-f="ctl" class="need-control">Limited / blocked</button></span>
       </div>
       <div id="devices"><div class="empty">Loading…</div></div>
     </div>
@@ -203,7 +208,7 @@ ol.how{margin:6px 0 0;padding-left:20px;font-size:14px;color:var(--muted)} ol.ho
 
   <!-- CHECK -->
   <section id="tab-check" class="hidden">
-    <div class="card">
+    <div class="card need-speed_limit">
       <h2>Do the speed limits really work?</h2>
       <p class="hint" style="margin-top:0">This limits <b>this computer</b> for about a minute, measures the speed, then removes the limit again. Run it once; the program then uses whatever works on this router. Run it on a Wi-Fi computer and a cable computer for both kinds of device. It uses about 100 MB of data.</p>
       <button class="btn primary" id="stRun">Run the speed-limit test</button>
@@ -212,6 +217,7 @@ ol.how{margin:6px 0 0;padding-left:20px;font-size:14px;color:var(--muted)} ol.ho
     </div>
     <div class="card">
       <h2>What this router offers</h2>
+      <p class="model" id="featModel"></p>
       <div class="feat" id="feat"></div>
     </div>
     <div class="card">
@@ -258,6 +264,9 @@ ol.how{margin:6px 0 0;padding-left:20px;font-size:14px;color:var(--muted)} ol.ho
     <div class="card">
       <h2>Router login</h2>
       <p class="hint" style="margin-top:0">The same address, user name and password you use to open the router's page in a browser.</p>
+      <div class="field"><label for="sModel">Router model</label>
+        <select id="sModel"><option value="auto">Find it automatically (recommended)</option></select>
+        <span class="hint" id="sModelHint"></span></div>
       <div class="row">
         <div class="field"><label for="sHost">Router address</label><input type="text" id="sHost" placeholder="192.168.1.1"></div>
         <div class="field"><label for="sUser">User name</label><input type="text" id="sUser" placeholder="admin"></div>
@@ -265,7 +274,7 @@ ol.how{margin:6px 0 0;padding-left:20px;font-size:14px;color:var(--muted)} ol.ho
       <div class="field"><label for="sPass">Password</label><input type="password" id="sPass" placeholder="" autocomplete="off"></div>
       <h2 style="margin-top:18px">Advanced</h2>
       <div class="row">
-        <div class="field"><label for="sMethod">How to limit download</label>
+        <div class="field need-speed_limit"><label for="sMethod">How to limit download</label>
           <select id="sMethod">
             <option value="auto">Automatic (use the test result)</option>
             <option value="router">Router download rule</option>
@@ -323,7 +332,7 @@ const state = {tab:"home", range:600, filter:"online", q:"", ov:null, devices:[]
 try { state.filter = localStorage.getItem("filter") || "online"; } catch (e) {}
 
 async function api(path, body) {
-  const opt = body === undefined ? {} : {method:"POST", headers:{"Content-Type":"application/json","X-Requested-With":"dlink-dsl-control"}, body:JSON.stringify(body)};
+  const opt = body === undefined ? {} : {method:"POST", headers:{"Content-Type":"application/json","X-Requested-With":"home-internet-control"}, body:JSON.stringify(body)};
   const r = await fetch(path, opt);
   const ct = r.headers.get("Content-Type") || "";
   const data = ct.includes("json") ? await r.json() : await r.text();
@@ -357,11 +366,19 @@ async function loadOverview() {
   try { state.ov = await api("/api/overview?s=" + state.range); renderOverview(); }
   catch (e) { $("#connDot").className = "dot bad"; $("#connText").textContent = "Program not reachable"; }
 }
+// What the connected router can do. Until that is known, everything is shown.
+const CAPS = ["devices","wifi","traffic","speed_limit","pause","bedtime","sites"];
+const can = k => { const c = state.ov && state.ov.caps; return !c || !Object.keys(c).length || !!c[k]; };
+function applyCaps() {
+  CAPS.forEach(k => document.body.classList.toggle("no-" + k, !can(k)));
+  if (state.tab === "sites" && !can("sites")) show("home");
+}
 function renderOverview() {
   const o = state.ov, st = o.status;
+  applyCaps();
   const dot = $("#connDot"), txt = $("#connText");
   if (!st.configured) { dot.className = "dot warn"; txt.textContent = "Not set up"; }
-  else if (st.connected) { dot.className = "dot ok"; txt.textContent = (st.info.model || "Router") + " connected"; }
+  else if (st.connected) { dot.className = "dot ok"; txt.textContent = (st.info.model || st.model_name || "Router") + " connected"; }
   else { dot.className = "dot bad"; txt.textContent = "Router not reachable"; }
   const b = [];
   if (!st.configured) b.push(`<div class="banner info">Welcome! Enter the router password under <b>Settings</b> to start. <button class="btn" onclick="show('settings')">Open Settings</button></div>`);
@@ -378,7 +395,8 @@ function renderOverview() {
   $("#tPingS").textContent = p.samples ? `Avg ${p.avg ?? "–"} ms · ${p.loss}% lost · router ${o.ping.router.ms != null ? Math.round(o.ping.router.ms) + " ms" : "–"}` : " ";
   const c = o.counts;
   $("#tDev").textContent = c.online;
-  $("#tDevS").textContent = `${c.wifi} Wi-Fi · ${c.wired} cable · ${c.limited} limited · ${c.blocked} blocked`;
+  $("#tDevS").textContent = [can("wifi") ? `${c.wifi} Wi-Fi · ${c.wired} cable` : `${c.known} known`,
+    can("speed_limit") ? `${c.limited} limited` : "", can("pause") ? `${c.blocked} blocked` : ""].filter(Boolean).join(" · ");
   drawChart(t.history);
   const names = {wl0:"Wi-Fi 2.4 GHz", wl1:"Wi-Fi 5 GHz"};
   $("#ifaces").innerHTML = Object.entries(t.ifaces || {}).filter(([n, v]) => !/^br|^lo/.test(n) && !(/^eth\d/.test(n) && !v.down && !v.up))
@@ -473,9 +491,9 @@ function renderDevices() {
           ${d.online ? "" : `<span>seen ${ago(d.last_seen)}</span>`}<span style="color:var(--faint)">${esc(d.mac)}</span></div>
         ${badges.length ? `<div class="badges">${badges.join("")}</div>` : ""}</div>
       <div class="acts">
-        <button class="btn" data-act="limit">Speed…</button>
-        <button class="btn ${paused ? "primary" : ""}" data-act="${paused ? "unblock" : "pause"}">${paused ? "Resume internet" : "Pause internet"}</button>
-        <button class="btn" data-act="bedtime">Bedtime…</button>
+        ${can("speed_limit") || d.limit ? `<button class="btn" data-act="limit">Speed…</button>` : ""}
+        ${can("pause") || paused ? `<button class="btn ${paused ? "primary" : ""}" data-act="${paused ? "unblock" : "pause"}">${paused ? "Resume internet" : "Pause internet"}</button>` : ""}
+        ${can("bedtime") || (d.block && !paused) ? `<button class="btn" data-act="bedtime">Bedtime…</button>` : ""}
       </div></div>`;
   }).join("");
 }
@@ -580,12 +598,11 @@ $("#sites").addEventListener("click", async e => { const b = e.target.closest("b
   try { const r = await api("/api/site", {action:"remove", url:b.dataset.url}); state.ov.sites = r.sites; renderSites(); } catch (x) { toast("Failed: " + x.message); } });
 
 // ---------- check
-const FEAT = {qos:"Speed rules list", qosform:"Speed limit form", blockmac:"Block / pause device", sched:"Schedules (bedtime)",
-              urlflt:"Website blocking", stations:"Wi-Fi device list", arp:"Address table"};
 function renderCheck() {
   const o = state.ov; if (!o) return;
-  const f = o.features || {};
-  $("#feat").innerHTML = Object.keys(f).length ? Object.entries(FEAT).map(([k, n]) => `<div><span class="dot ${f[k] ? "ok" : "bad"}"></span>${n}</div>`).join("")
+  const ch = o.checks || [];
+  $("#featModel").innerHTML = o.status.model_name ? `Model: <b>${esc(o.status.model_name)}</b>` : "";
+  $("#feat").innerHTML = ch.length ? ch.map(([n, ok]) => `<div><span class="dot ${ok ? "ok" : "bad"}"></span>${esc(n)}</div>`).join("")
     : `<span class="hint">Shown once the router is connected.</span>`;
   const run = o.selftest_run || {};
   $("#stRun").disabled = !!run.running || !o.status.connected;
@@ -656,14 +673,25 @@ $("#pinIn").addEventListener("keydown", e => { if (e.key === "Enter") login($("#
 async function loadSettings() {
   loadPhone();
   try { const s = await api("/api/settings");
+    state.models = s.models;
+    $("#sModel").innerHTML = `<option value="auto">Find it automatically (recommended)</option>` +
+      s.models.map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
+    $("#sModel").value = s.model; $("#sModel").dataset.detected = s.detected_name || ""; modelHint();
     $("#sHost").value = s.host; $("#sUser").value = s.username; $("#sMethod").value = s.download_method; $("#sPing").value = s.internet_ping;
     $("#sPass").placeholder = s.has_password ? "(saved — type to change)" : "router password"; } catch (x) {}
 }
+function modelHint() {
+  const v = $("#sModel").value, det = $("#sModel").dataset.detected;
+  const m = (state.models || []).find(x => x.id === v);
+  $("#sModelHint").textContent = v === "auto" ? (det ? "Found: " + det : "The program recognises the router when you press Save and connect.")
+    : (m ? "For: " + m.examples : "");
+}
+$("#sModel").addEventListener("change", modelHint);
 $("#sSave").addEventListener("click", async () => {
   const btn = $("#sSave"); btn.disabled = true; btn.textContent = "Connecting…"; $("#sErr").textContent = "";
-  try { await api("/api/settings", {host:$("#sHost").value, username:$("#sUser").value, password:$("#sPass").value,
-      download_method:$("#sMethod").value, internet_ping:$("#sPing").value});
-    $("#sPass").value = ""; toast("Connected to the router"); show("home"); loadOverview(); setTimeout(loadDevices, 1500); }
+  try { const r = await api("/api/settings", {host:$("#sHost").value, username:$("#sUser").value, password:$("#sPass").value,
+      model:$("#sModel").value, download_method:$("#sMethod").value, internet_ping:$("#sPing").value});
+    $("#sPass").value = ""; toast("Connected to " + (r.model_name || "the router")); show("home"); loadOverview(); setTimeout(loadDevices, 1500); }
   catch (x) { $("#sErr").textContent = x.message; }
   btn.disabled = false; btn.textContent = "Save and connect";
 });

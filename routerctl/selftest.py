@@ -19,7 +19,7 @@ UP_HOST, UP_PATH = "speed.cloudflare.com", "/__up"
 
 def measure_down(seconds=8, url=DOWN_URL, warmup=1.5):
     """Average download speed in kbit/s over `seconds` (the first `warmup` seconds are skipped)."""
-    req = urllib.request.Request(url, headers={"User-Agent": "dlink-dsl-control"})
+    req = urllib.request.Request(url, headers={"User-Agent": "home-internet-control"})
     t0 = time.time()
     got, t_start = 0, None
     with urllib.request.urlopen(req, timeout=15) as r:
@@ -115,7 +115,7 @@ class SelfTest:
         ctl = self.ctl
         me = None
         try:
-            ctl._need_router()
+            ctl._need_router("speed_limit")
             me = self.find_me()
             if not me.get("mac"):
                 raise RuntimeError("This computer (%s) is not in the router's device list yet. Wait a minute and "

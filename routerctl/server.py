@@ -16,10 +16,10 @@ import threading
 import time
 import urllib.parse
 
-from . import report
+from . import drivers, report
 from .control import Store
+from .drivers import RouterError
 from .qr import QR
-from .router import LoginError, Router, RouterError
 from .selftest import SelfTest
 
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -30,6 +30,8 @@ COOKIE = "dslc_session"
 
 DEFAULT_CONFIG = {
     "router": {"host": "192.168.1.1", "username": "admin", "password": ""},
+    "model": "auto",            # "auto" or a driver id from routerctl/drivers (e.g. "dlink-broadcom")
+    "detected_model": "",       # what auto-detect found last time
     "port": 8770,
     "phone_access": False,
     "phone_pin": "",
@@ -98,6 +100,7 @@ class App:
         self.port = int(ctl.cfg.get("port", 8770))
         self.restart = False
         self.trust_localhost = True      # tests switch this off to act like a phone
+        ctl.save_config = self._save
         self.ensure_pin()
 
     # --- phone access
@@ -183,7 +186,10 @@ class App:
     def settings(self):
         c = self.ctl.cfg
         r = c.get("router", {})
+        detected = c.get("detected_model", "")
         return {"host": r.get("host", ""), "username": r.get("username", ""), "has_password": bool(r.get("password")),
+                "model": c.get("model", "auto"), "models": drivers.model_list(),
+                "detected": detected, "detected_name": drivers.model_name(detected),
                 "download_method": c.get("download_method", "auto"), "internet_ping": c.get("internet_ping", "1.1.1.1"),
                 "wifi_bands": c.get("wifi_bands", {})}
 
@@ -197,22 +203,32 @@ class App:
         r["username"] = (body.get("username") or r.get("username") or "admin").strip()
         if body.get("password"):
             r["password"] = body["password"]
+        model = body.get("model") or cfg.get("model") or "auto"
+        if model != "auto" and model not in drivers.MODELS:
+            return 400, {"error": "Unknown router model"}
+        cfg["model"] = model
         if body.get("download_method") in ("auto", "router", "upload_trick"):
             cfg["download_method"] = body["download_method"]
         if body.get("internet_ping"):
             cfg["internet_ping"] = body["internet_ping"].strip()
         if not r.get("password"):
             return 400, {"error": "Enter the router password"}
+        kw = {"pages": cfg.get("pages"), "params": cfg.get("params"), "log": self.ctl.log}
         try:
-            test = Router(r["host"], r["username"], r["password"], timeout=8)
-            test.login()
+            if model == "auto":
+                drv = drivers.detect(r["host"], r["username"], r["password"], timeout=8, **kw)
+                cfg["detected_model"] = drv.MODEL
+            else:
+                drv = drivers.make(model, r["host"], r["username"], r["password"], timeout=8, **kw)
+                drv.login()
+            drv.timeout = 10
         except RouterError as e:
             return 400, {"error": str(e)}
         with self.lock:
             save_config(self.config_path, cfg)
-            self.ctl.reconfigure(cfg)
-        self.ctl.log("settings saved (router %s, user %s)" % (r["host"], r["username"]))
-        return 200, {"ok": True, "settings": self.settings()}
+            self.ctl.reconfigure(cfg, router=drv)
+        self.ctl.log("settings saved (router %s, user %s, model %s)" % (r["host"], r["username"], drv.NAME))
+        return 200, {"ok": True, "model": drv.MODEL, "model_name": drv.NAME, "settings": self.settings()}
 
     def device_action(self, body):
         mac, action = body.get("mac", ""), body.get("action")
@@ -249,7 +265,7 @@ OFF_PAGE = """<!doctype html><meta name=viewport content="width=device-width,ini
 
 class Handler(http.server.BaseHTTPRequestHandler):
     app = None
-    server_version = "dlink-dsl-control"
+    server_version = "home-internet-control"
 
     def log_message(self, *a):
         pass
@@ -358,7 +374,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # --- POST
 
     def do_POST(self):
-        if not self._host_ok() or self.headers.get("X-Requested-With") != "dlink-dsl-control":
+        if not self._host_ok() or self.headers.get("X-Requested-With") != "home-internet-control":
             return self._text(403, "forbidden")
         n = int(self.headers.get("Content-Length") or 0)
         if n > 100000:

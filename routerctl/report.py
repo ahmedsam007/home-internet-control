@@ -14,9 +14,10 @@ import sys
 import time
 
 from . import parsing as P
-from .router import RouterError
+from . import drivers
+from .drivers import RouterError
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
 
 def _mask_mac(m):
@@ -45,12 +46,14 @@ def redact(text, password=""):
 def build(ctl):
     lines = []
     add = lines.append
-    add("D-Link DSL Control report — %s" % time.strftime("%Y-%m-%d %H:%M"))
+    add("Home Internet Control report — %s" % time.strftime("%Y-%m-%d %H:%M"))
     add("App %s, Python %s, %s %s" % (VERSION, sys.version.split()[0], platform.system(), platform.release()))
     st = ctl.status
     add("Connected: %s   Error: %s" % (st.get("connected"), st.get("error") or "-"))
     add("Router info: %s" % json.dumps(st.get("info", {})))
-    add("QoS on: %s   Clock set: %s   Block type: %s" % (st.get("qos_on"), st.get("clock_ok"), st.get("block_kind")))
+    add("Model: %s (setting: %s)" % (st.get("model_name") or "-", ctl.cfg.get("model", "auto")))
+    add("Can do: %s" % (", ".join(k for k, v in ctl.caps.items() if v) or "-"))
+    add("Clock set: %s" % st.get("clock_ok"))
     add("Warnings: %s" % ("; ".join(st.get("warnings", [])) or "-"))
     r = ctl.router
     if r is not None:
@@ -67,34 +70,26 @@ def build(ctl):
                     add("    form %s -> %s" % (f["base"], ", ".join(f["params"])))
         except RouterError as e:
             add("probe failed: %s" % e)
-        add("")
-        add("== QoS ==")
         try:
-            q = r.qos()
-            add("Interfaces: %s" % " | ".join(q["ifaces"]))
-            add("Queues: %s" % " | ".join("%s=%s" % (x["key"], x["text"]) for x in q["queues"]))
-            add("Rule order 'Last' value: %s   rate field shown: %s" % (q["order_last"], q["tc_enabled"]))
-            for x in q["rules"]:
-                add("  rule %s intf=%s src=%s dst=%s queue=%s rate=%s on=%s" % (
-                    x["name"], x.get("intf"), x.get("src_mac"), x.get("dst_ip"), x.get("queue_key"), x.get("rate"), x.get("enabled")))
-            t, spec, key = r.qos_form()
-            if spec:
-                add("Add-rule script (from the router page):")
-                add(spec.source[:3000])
+            lines.extend(r.report_lines())
         except RouterError as e:
-            add("QoS read failed: %s" % e)
-        for feature, marker in (("blockmac", ".tod?action=add"), ("sched", "sciptsched.sched?action=add"),
-                                ("urlflt", "urlfilter.cmd?action=add")):
-            try:
-                t = r.fetch(feature)
-                spec = P.form_spec(t, "blockmac.tod?action=add" if feature == "blockmac" and "blockmac.tod" in t else
-                                   ("todmngr.tod" if feature == "blockmac" else marker))
-                if spec:
-                    add("")
-                    add("%s script:" % feature)
-                    add(spec.source[:1500])
-            except RouterError:
-                pass
+            add("driver report failed: %s" % e)
+    elif st.get("configured"):
+        add("")
+        add("== Router front page (not logged in) ==")
+        try:
+            args, kw = ctl._driver_args()
+            status, text, headers = drivers.front_page(args[0])
+            ranked = drivers.rank(status, text, headers)
+            add("HTTP %s, %d bytes, server: %s" % (status, len(text), headers.get("server", "-")))
+            add("Model scores: %s" % ", ".join("%s=%d" % (d.MODEL, s) for d, s in ranked))
+            title = re.search(r"(?is)<title>(.*?)</title>", text)
+            add("Title: %s" % (P.clean(P.strip_tags(title.group(1))) if title else "-"))
+            drv = drivers.make(ctl.model() or ranked[0][0].MODEL, *args, **kw)
+            drv.front = (status, text)
+            lines.extend(drv.report_lines())
+        except RouterError as e:
+            add("could not read it: %s" % e)
     add("")
     add("== Devices ==")
     devs = ctl.device_list()
