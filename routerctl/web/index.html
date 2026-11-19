@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home Internet Control</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%232f6fdd' d='M12 18a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm0-6c2.5 0 4.7 1 6.4 2.6l-1.6 1.6A6.7 6.7 0 0 0 12 14.3c-1.9 0-3.6.7-4.8 1.9l-1.6-1.6A9 9 0 0 1 12 12Zm0-6c4.2 0 8 1.7 10.8 4.4l-1.6 1.6A13 13 0 0 0 12 8.3c-3.6 0-6.9 1.4-9.2 3.7L1.2 10.4A15.3 15.3 0 0 1 12 6Z'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f5f6f8; --panel:#fff; --panel2:#f0f2f5; --line:#e2e5ea; --text:#1b1f24; --muted:#5f6873; --faint:#8a929c;
+  --accent:#2f6fdd; --accent-ink:#fff; --down:#2f6fdd; --up:#d9822b;
+  --ok:#1f8a4c; --ok-bg:#e5f4ea; --warn:#9a6700; --warn-bg:#fff4d6; --bad:#c62f2f; --bad-bg:#fdeaea; --info-bg:#e8f0fd;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08); --r:12px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1216; --panel:#171b21; --panel2:#1e232b; --line:#2a3039; --text:#e8ebef; --muted:#a2abb6; --faint:#768090;
+  --accent:#5b93f0; --accent-ink:#0b1220; --down:#5b93f0; --up:#f0a050;
+  --ok:#4cc27e; --ok-bg:#16301f; --warn:#e8b84a; --warn-bg:#33290f; --bad:#f07070; --bad-bg:#3a1818; --info-bg:#172338;
+  --shadow:none;
+}}
+:root[data-theme="dark"]{
+  --bg:#0f1216; --panel:#171b21; --panel2:#1e232b; --line:#2a3039; --text:#e8ebef; --muted:#a2abb6; --faint:#768090;
+  --accent:#5b93f0; --accent-ink:#0b1220; --down:#5b93f0; --up:#f0a050;
+  --ok:#4cc27e; --ok-bg:#16301f; --warn:#e8b84a; --warn-bg:#33290f; --bad:#f07070; --bad-bg:#3a1818; --info-bg:#172338;
+  --shadow:none;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,input,select{font:inherit;color:inherit}
+.wrap{max-width:1080px;margin:0 auto;padding:0 16px 48px}
+header{display:flex;align-items:center;gap:12px;padding:16px 0 8px;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;font-weight:650;letter-spacing:-.01em}
+.conn{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px;min-width:0}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);display:inline-block;flex:none}
+.dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)} .dot.warn{background:var(--warn)}
+nav{display:flex;gap:4px;margin-left:auto;background:var(--panel2);padding:3px;border-radius:10px}
+nav button{border:0;background:none;padding:6px 12px;border-radius:8px;cursor:pointer;color:var(--muted);font-size:14px}
+nav button.on{background:var(--panel);color:var(--text);box-shadow:var(--shadow)}
+.banner{border-radius:10px;padding:10px 14px;margin:8px 0;font-size:14px}
+.banner.warn{background:var(--warn-bg);color:var(--warn)} .banner.bad{background:var(--bad-bg);color:var(--bad)}
+.banner.info{background:var(--info-bg)}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0}
+.tile,.card,.dev>div{min-width:0}
+.tile,.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.tile{padding:14px 16px}
+.tile .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.tile .v{font-size:26px;font-weight:650;font-variant-numeric:tabular-nums;margin-top:2px;white-space:nowrap}
+.tile .v small{font-size:14px;font-weight:500;color:var(--muted)}
+.tile .s{font-size:13px;color:var(--muted);margin-top:2px}
+.card{padding:16px;margin:12px 0}
+.card h2{font-size:15px;margin:0 0 10px;font-weight:650;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card h2 .sp{flex:1}
+.legend{display:flex;gap:14px;font-size:13px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+canvas{width:100%;height:190px;display:block}
+.ifaces{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.chip{font-size:12.5px;background:var(--panel2);border-radius:999px;padding:4px 10px;color:var(--muted);font-variant-numeric:tabular-nums}
+.chip b{color:var(--text);font-weight:600}
+.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tools input[type=search]{flex:1;min-width:160px}
+input[type=text],input[type=password],input[type=search],input[type=number],input[type=time],select{
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;outline:none}
+input:focus,select:focus{border-color:var(--accent)}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--panel2)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{color:var(--bad)}
+.btn:disabled{opacity:.5;cursor:default}
+.seg{display:inline-flex;background:var(--panel2);border-radius:8px;padding:2px}
+.seg button{border:0;background:none;padding:4px 10px;border-radius:6px;cursor:pointer;color:var(--muted);font-size:13px}
+.seg button.on{background:var(--panel);color:var(--text);box-shadow:var(--shadow)}
+.dev{display:grid;grid-template-columns:auto 1fr auto;gap:4px 12px;align-items:center;padding:12px 4px;border-top:1px solid var(--line)}
+.dev:first-child{border-top:0}
+.dev .name{font-weight:600;cursor:pointer}
+.dev .name:hover{text-decoration:underline dotted}
+.dev .meta{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 12px;font-variant-numeric:tabular-nums}
+.dev .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.dev.off .name{color:var(--muted);font-weight:500}
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.badge{font-size:12px;border-radius:6px;padding:2px 8px;background:var(--panel2);color:var(--muted)}
+.badge.lim{background:var(--info-bg);color:var(--accent)} .badge.blk{background:var(--bad-bg);color:var(--bad)}
+.badge.warn{background:var(--warn-bg);color:var(--warn)}
+.empty{color:var(--muted);padding:20px 4px;text-align:center}
+.spark{display:inline-flex;gap:1px;align-items:flex-end;height:12px;vertical-align:-1px}
+.spark i{width:3px;background:var(--ok);border-radius:1px;opacity:.75}
+.spark i.miss{background:var(--bad);height:12px!important;opacity:.5}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--text);padding:20px;width:min(440px,calc(100vw - 32px));box-shadow:0 20px 50px rgba(0,0,0,.25)}
+dialog::backdrop{background:rgba(10,14,20,.45)}
+dialog h3{margin:0 0 4px;font-size:17px}
+dialog p.sub{margin:0 0 14px;color:var(--muted);font-size:13px}
+.field{display:flex;flex-direction:column;gap:4px;margin:10px 0}
+.field label{font-size:13px;color:var(--muted)}
+.row{display:flex;gap:10px} .row>*{flex:1}
+.presets{display:flex;gap:6px;flex-wrap:wrap}
+.presets button{font-size:13px}
+.days{display:flex;gap:4px;flex-wrap:wrap}
+.days label{display:flex;align-items:center;gap:3px;font-size:13px;background:var(--panel2);padding:4px 8px;border-radius:6px;cursor:pointer}
+.foot{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+.foot .left{margin-right:auto}
+.err{color:var(--bad);font-size:13px;min-height:1em;margin-top:8px}
+.hint{font-size:13px;color:var(--muted)}
+.steps{font-size:14px;margin:10px 0 0;padding-left:18px}
+.steps li{margin:3px 0}
+textarea{width:100%;min-height:220px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px}
+.feat{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px;font-size:14px}
+.feat div{display:flex;gap:8px;align-items:center}
+.list{margin:0;padding:0;list-style:none}
+.list li{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.list li:first-child{border-top:0}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100vw - 32px)}
+.toast.show{opacity:1}
+.hidden{display:none!important}
+.usage{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:8px}
+.usage b{color:var(--text);font-variant-numeric:tabular-nums}
+@media (max-width:760px){
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tools .seg{width:100%;overflow-x:auto}
+  .tile .v small{font-size:12px}
+  nav{margin-left:0;width:100%;overflow-x:auto}
+  .dev{grid-template-columns:auto 1fr}
+  .dev .acts{grid-column:1/-1;justify-content:flex-start;padding-left:20px}
+  .tile .v{font-size:22px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Home Internet Control</h1>
+    <span class="conn"><span class="dot" id="connDot"></span><span id="connText">Starting…</span></span>
+    <nav id="nav">
+      <button data-tab="home" class="on">Home</button>
+      <button data-tab="sites">Websites</button>
+      <button data-tab="check">Check</button>
+      <button data-tab="settings">Settings</button>
+    </nav>
+  </header>
+  <div id="banners"></div>
+
+  <!-- HOME -->
+  <section id="tab-home">
+    <div class="tiles">
+      <div class="tile"><div class="k">Download now</div><div class="v" id="tDown">–</div><div class="s" id="tDownS">&nbsp;</div></div>
+      <div class="tile"><div class="k">Upload now</div><div class="v" id="tUp">–</div><div class="s" id="tUpS">&nbsp;</div></div>
+      <div class="tile"><div class="k">Internet ping</div><div class="v" id="tPing">–</div><div class="s" id="tPingS">&nbsp;</div></div>
+      <div class="tile"><div class="k">Devices online</div><div class="v" id="tDev">–</div><div class="s" id="tDevS">&nbsp;</div></div>
+    </div>
+    <div class="card">
+      <h2>Internet speed <span class="sp"></span>
+        <span class="legend"><span><i style="background:var(--down)"></i>Download</span><span><i style="background:var(--up)"></i>Upload</span></span>
+        <span class="seg" id="range"><button data-s="600" class="on">10 min</button><button data-s="3600">1 h</button></span>
+      </h2>
+      <canvas id="chart" aria-label="Download and upload speed over time"></canvas>
+      <div class="ifaces" id="ifaces"></div>
+      <div class="usage" id="usage"></div>
+    </div>
+    <div class="card">
+      <h2>Devices <span class="sp"></span><span class="hint" id="devHint"></span></h2>
+      <div class="tools" style="margin-bottom:6px">
+        <input type="search" id="q" placeholder="Search name, address…">
+        <span class="seg" id="filter"><button data-f="online" class="on">Online</button><button data-f="all">All</button><button data-f="ctl">Limited / blocked</button></span>
+      </div>
+      <div id="devices"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
+
+  <!-- WEBSITES -->
+  <section id="tab-sites" class="hidden">
+    <div class="card">
+      <h2>Blocked websites</h2>
+      <p class="hint" style="margin-top:0">These are blocked for <b>every device</b> in the house (the router can't block a website for one device only).</p>
+      <div class="tools"><input type="text" id="siteIn" placeholder="example.com" style="flex:1"><button class="btn primary" id="siteAdd">Block website</button></div>
+      <ul class="list" id="sites" style="margin-top:10px"></ul>
+    </div>
+  </section>
+
+  <!-- CHECK -->
+  <section id="tab-check" class="hidden">
+    <div class="card">
+      <h2>Do the speed limits really work?</h2>
+      <p class="hint" style="margin-top:0">This limits <b>this computer</b> for about a minute, measures the speed, then removes the limit again. Run it once; the program then uses whatever works on this router. Run it on a Wi-Fi computer and a cable computer for both kinds of device. It uses about 100 MB of data.</p>
+      <button class="btn primary" id="stRun">Run the speed-limit test</button>
+      <ol class="steps" id="stSteps"></ol>
+      <div id="stPrev" class="hint"></div>
+    </div>
+    <div class="card">
+      <h2>What this router offers</h2>
+      <div class="feat" id="feat"></div>
+    </div>
+    <div class="card">
+      <h2>Report for your helper <span class="sp"></span>
+        <button class="btn" id="repLoad">Create report</button>
+        <button class="btn" id="repCopy" disabled>Copy</button>
+        <button class="btn" id="repSave" disabled>Save as file</button></h2>
+      <p class="hint" style="margin-top:0">If something doesn't work, create the report and send it to whoever helps you. Device addresses are shortened and the password is not included.</p>
+      <textarea id="rep" readonly placeholder="Press “Create report”"></textarea>
+    </div>
+    <div class="card">
+      <h2>Recent actions</h2>
+      <textarea id="log" readonly style="min-height:140px"></textarea>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings" class="hidden">
+    <div class="card">
+      <h2>Router login</h2>
+      <p class="hint" style="margin-top:0">The same address, user name and password you use to open the router's page in a browser.</p>
+      <div class="row">
+        <div class="field"><label for="sHost">Router address</label><input type="text" id="sHost" placeholder="192.168.1.1"></div>
+        <div class="field"><label for="sUser">User name</label><input type="text" id="sUser" placeholder="admin"></div>
+      </div>
+      <div class="field"><label for="sPass">Password</label><input type="password" id="sPass" placeholder="" autocomplete="off"></div>
+      <h2 style="margin-top:18px">Advanced</h2>
+      <div class="row">
+        <div class="field"><label for="sMethod">How to limit download</label>
+          <select id="sMethod">
+            <option value="auto">Automatic (use the test result)</option>
+            <option value="router">Router download rule</option>
+            <option value="upload_trick">Upload trick (low upload cap)</option>
+          </select></div>
+        <div class="field"><label for="sPing">Internet ping target</label><input type="text" id="sPing" placeholder="1.1.1.1"></div>
+      </div>
+      <div class="foot"><button class="btn primary" id="sSave">Save and connect</button></div>
+      <div class="err" id="sErr"></div>
+    </div>
+  </section>
+</div>
+
+<!-- dialogs -->
+<dialog id="dLimit">
+  <h3>Speed limit</h3><p class="sub" id="dLimitSub"></p>
+  <div class="presets" id="presets">
+    <button class="btn" data-d="1000" data-u="256">Light · 1 Mbit/s</button>
+    <button class="btn" data-d="3000" data-u="512">Normal · 3 Mbit/s</button>
+    <button class="btn" data-d="6000" data-u="1000">Video · 6 Mbit/s</button>
+  </div>
+  <div class="row">
+    <div class="field"><label for="lDown">Download (Mbit/s)</label><input type="number" id="lDown" min="0" step="0.1" placeholder="no limit"></div>
+    <div class="field"><label for="lUp">Upload (Mbit/s)</label><input type="number" id="lUp" min="0" step="0.1" placeholder="no limit"></div>
+  </div>
+  <p class="hint" id="lNote"></p>
+  <div class="err" id="lErr"></div>
+  <div class="foot"><button class="btn danger left hidden" id="lRemove">Remove limit</button><button class="btn" data-close>Cancel</button><button class="btn primary" id="lSave">Save</button></div>
+</dialog>
+
+<dialog id="dBlock">
+  <h3>Bedtime</h3><p class="sub" id="dBlockSub">No internet during these hours. The device stays on the Wi-Fi.</p>
+  <div class="row">
+    <div class="field"><label for="bFrom">From</label><input type="time" id="bFrom" value="23:00"></div>
+    <div class="field"><label for="bTo">Until</label><input type="time" id="bTo" value="07:00"></div>
+  </div>
+  <div class="field"><label>Days</label><div class="days" id="bDays"></div></div>
+  <div class="err" id="bErr"></div>
+  <div class="foot"><button class="btn danger left hidden" id="bRemove">Remove bedtime</button><button class="btn" data-close>Cancel</button><button class="btn primary" id="bSave">Save</button></div>
+</dialog>
+
+<dialog id="dName">
+  <h3>Name this device</h3><p class="sub" id="dNameSub"></p>
+  <div class="field"><input type="text" id="nIn" maxlength="40" placeholder="e.g. Sara's phone"></div>
+  <div class="foot"><button class="btn danger left" id="nForget">Forget device</button><button class="btn" data-close>Cancel</button><button class="btn primary" id="nSave">Save</button></div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const state = {tab:"home", range:600, filter:"online", q:"", ov:null, devices:[], current:null};
+try { state.filter = localStorage.getItem("filter") || "online"; } catch (e) {}
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {method:"POST", headers:{"Content-Type":"application/json","X-Requested-With":"dlink-dsl-control"}, body:JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  const ct = r.headers.get("Content-Type") || "";
+  const data = ct.includes("json") ? await r.json() : await r.text();
+  if (!r.ok) throw new Error((data && data.error) || ("HTTP " + r.status));
+  return data;
+}
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3200); }
+function speed(kbps) {
+  if (kbps == null) return "–";
+  if (kbps >= 1000) return (kbps/1000).toFixed(kbps >= 10000 ? 0 : 1) + "<small> Mbit/s</small>";
+  return Math.round(kbps) + "<small> kbit/s</small>";
+}
+const plain = k => k == null ? "–" : (k >= 1000 ? (k/1000).toFixed(1) + " Mbit/s" : Math.round(k) + " kbit/s");
+const bytes = b => b >= 1e9 ? (b/1e9).toFixed(2) + " GB" : b >= 1e6 ? (b/1e6).toFixed(0) + " MB" : Math.round((b||0)/1e3) + " KB";
+const ago = t => { if (!t) return "never"; const s = Date.now()/1000 - t; if (s < 90) return "just now"; if (s < 3600) return Math.round(s/60) + " min ago"; if (s < 86400) return Math.round(s/3600) + " h ago"; return Math.round(s/86400) + " days ago"; };
+
+// ---------- tabs
+$("#nav").addEventListener("click", e => { const b = e.target.closest("button"); if (b) show(b.dataset.tab); });
+function show(tab) {
+  state.tab = tab;
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  ["home","sites","check","settings"].forEach(t => $("#tab-" + t).classList.toggle("hidden", t !== tab));
+  if (tab === "settings") loadSettings();
+  if (tab === "check") { renderCheck(); loadLog(); }
+  if (tab === "sites") renderSites();
+}
+
+// ---------- overview
+async function loadOverview() {
+  try { state.ov = await api("/api/overview?s=" + state.range); renderOverview(); }
+  catch (e) { $("#connDot").className = "dot bad"; $("#connText").textContent = "Program not reachable"; }
+}
+function renderOverview() {
+  const o = state.ov, st = o.status;
+  const dot = $("#connDot"), txt = $("#connText");
+  if (!st.configured) { dot.className = "dot warn"; txt.textContent = "Not set up"; }
+  else if (st.connected) { dot.className = "dot ok"; txt.textContent = (st.info.model || "Router") + " connected"; }
+  else { dot.className = "dot bad"; txt.textContent = "Router not reachable"; }
+  const b = [];
+  if (!st.configured) b.push(`<div class="banner info">Welcome! Enter the router password under <b>Settings</b> to start. <button class="btn" onclick="show('settings')">Open Settings</button></div>`);
+  else if (st.error) b.push(`<div class="banner bad">${esc(st.error)}</div>`);
+  (st.warnings || []).forEach(w => b.push(`<div class="banner warn">${esc(w)}</div>`));
+  $("#banners").innerHTML = b.join("");
+
+  const t = o.traffic;
+  $("#tDown").innerHTML = speed(t.down); $("#tUp").innerHTML = speed(t.up);
+  $("#tDownS").textContent = t.peak_down != null ? "Peak " + plain(t.peak_down) : (st.connected ? "Measuring…" : " ");
+  $("#tUpS").textContent = t.peak_up != null ? "Peak " + plain(t.peak_up) : " ";
+  const p = o.ping.internet;
+  $("#tPing").innerHTML = p.ms != null ? Math.round(p.ms) + "<small> ms</small>" : (p.samples ? "No reply" : "–");
+  $("#tPingS").textContent = p.samples ? `Avg ${p.avg ?? "–"} ms · ${p.loss}% lost · router ${o.ping.router.ms != null ? Math.round(o.ping.router.ms) + " ms" : "–"}` : " ";
+  const c = o.counts;
+  $("#tDev").textContent = c.online;
+  $("#tDevS").textContent = `${c.wifi} Wi-Fi · ${c.wired} cable · ${c.limited} limited · ${c.blocked} blocked`;
+  drawChart(t.history);
+  const names = {wl0:"Wi-Fi 2.4 GHz", wl1:"Wi-Fi 5 GHz"};
+  $("#ifaces").innerHTML = Object.entries(t.ifaces || {}).filter(([n, v]) => !/^br|^lo/.test(n) && !(/^eth\d/.test(n) && !v.down && !v.up))
+    .map(([n, v]) => `<span class="chip">${esc(names[n] || (/^eth\d/.test(n) ? "Cable port " + n.slice(3) : n))} <b>↓ ${plain(v.down)}</b> · ↑ ${plain(v.up)}</span>`).join("");
+  const days = Object.keys(o.usage || {}).sort().reverse();
+  const tot = n => days.slice(0, n).reduce((a, d) => [a[0] + o.usage[d].down, a[1] + o.usage[d].up], [0, 0]);
+  if (days.length) {
+    const td = tot(1), wk = tot(7);
+    $("#usage").innerHTML = `<span>Today <b>↓ ${bytes(td[0])}</b> ↑ ${bytes(td[1])}</span><span>Last 7 days <b>↓ ${bytes(wk[0])}</b> ↑ ${bytes(wk[1])}</span><span class="hint">Counted while this program runs.</span>`;
+  }
+  if (state.tab === "check") renderCheck();
+  if (state.tab === "sites") renderSites();
+}
+
+// ---------- chart (plain canvas, no libraries)
+function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function drawChart(hist) {
+  const cv = $("#chart"), dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
+  const now = Date.now()/1000, span = state.range;
+  const pts = (hist || []).filter(p => p[0] >= now - span);
+  const L = 52, R = 8, T = 8, B = 22, W = w - L - R, H = h - T - B;
+  let max = Math.max(1000, ...pts.map(p => Math.max(p[1], p[2])));
+  const steps = [1000,2000,5000,10000,20000,50000,100000,200000,500000,1e6];
+  const stepv = steps.find(s => max / s <= 4) || 1e6; max = Math.ceil(max / stepv) * stepv;
+  g.font = "11px system-ui,sans-serif"; g.fillStyle = css("--faint"); g.strokeStyle = css("--line"); g.lineWidth = 1;
+  for (let v = 0; v <= max; v += stepv) {
+    const y = T + H - v / max * H;
+    g.beginPath(); g.moveTo(L, Math.round(y) + .5); g.lineTo(L + W, Math.round(y) + .5); g.stroke();
+    g.textAlign = "right"; g.textBaseline = "middle"; g.fillText((v/1000) + " Mb", L - 6, y);
+  }
+  g.textAlign = "center"; g.textBaseline = "top";
+  const lab = span <= 600 ? [600,300,0] : [3600,1800,0];
+  lab.forEach(s => g.fillText(s ? "-" + (s >= 3600 ? "1 h" : s/60 + " min") : "now", L + W - s / span * W, T + H + 6));
+  if (pts.length < 2) { g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(state.ov && state.ov.status.connected ? "Collecting speed samples…" : "No data yet", L + W/2, T + H/2); return; }
+  const X = t => L + W - (now - t) / span * W, Y = v => T + H - Math.min(v, max) / max * H;
+  [[1, "--down", true], [2, "--up", false]].forEach(([i, col, fill]) => {
+    g.beginPath(); pts.forEach((p, k) => k ? g.lineTo(X(p[0]), Y(p[i])) : g.moveTo(X(p[0]), Y(p[i])));
+    g.strokeStyle = css(col); g.lineWidth = 2; g.lineJoin = "round"; g.stroke();
+    if (fill) { g.lineTo(X(pts[pts.length-1][0]), T + H); g.lineTo(X(pts[0][0]), T + H); g.closePath(); g.globalAlpha = .1; g.fillStyle = css(col); g.fill(); g.globalAlpha = 1; }
+  });
+}
+$("#range").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return;
+  state.range = +b.dataset.s; document.querySelectorAll("#range button").forEach(x => x.classList.toggle("on", x === b)); if (state.ov) drawChart(state.ov.traffic.history); });
+window.addEventListener("resize", () => state.ov && drawChart(state.ov.traffic.history));
+
+// ---------- devices
+async function loadDevices() { try { state.devices = (await api("/api/devices")).devices; renderDevices(); } catch (e) {} }
+function spark(recent) {
+  if (!recent || !recent.length) return "";
+  const m = Math.max(10, ...recent.filter(x => x != null));
+  return `<span class="spark" title="Last pings">${recent.slice(-12).map(v => v == null ? '<i class="miss"></i>' : `<i style="height:${Math.max(2, Math.round(v / m * 12))}px"></i>`).join("")}</span>`;
+}
+function dayNames(mask) {
+  if (!mask || mask === 127) return "every day";
+  return ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].filter((d, i) => mask & (1 << i)).join(", ");
+}
+function renderDevices() {
+  const f = state.filter, q = state.q.toLowerCase();
+  document.querySelectorAll("#filter button").forEach(b => b.classList.toggle("on", b.dataset.f === f));
+  let list = state.devices.filter(d => f === "all" || (f === "online" ? d.online : (d.limit || d.block)));
+  if (q) list = list.filter(d => [d.name, d.hostname, d.ip, d.mac].join(" ").toLowerCase().includes(q));
+  $("#devHint").textContent = `${state.devices.filter(d => d.online).length} online of ${state.devices.length} seen`;
+  if (!list.length) { $("#devices").innerHTML = `<div class="empty">${state.devices.length ? "No devices match." : "No devices yet. They appear once the router is connected."}</div>`; return; }
+  $("#devices").innerHTML = list.map(d => {
+    const name = d.name || d.hostname || "Unknown device";
+    const link = d.link === "wifi" ? "Wi-Fi " + (d.band || "") : d.link === "wired" ? "Cable" : "";
+    const p = d.ping || {};
+    const ping = d.ip ? (p.ms != null ? `${Math.round(p.ms)} ms ${spark(p.recent)}` : (p.samples ? `no ping reply ${spark(p.recent)}` : "")) : "";
+    const badges = [];
+    if (d.limit) {
+      const L = d.limit, parts = [];
+      if (L.down) parts.push("↓ " + plain(L.down)); if (L.up) parts.push("↑ " + plain(L.up));
+      let t = "Limited " + parts.join(" ");
+      if (L.method === "upload_trick" && L.down) t += ` (via upload cap ${plain(L.up_applied)})`;
+      badges.push(`<span class="badge lim">${esc(t)}</span>`);
+      if (!L.on_router) badges.push(`<span class="badge warn" title="${esc((L.missing||[]).join(", "))}">Not on router – press Speed → Save</span>`);
+    }
+    if (d.block) {
+      const B = d.block;
+      badges.push(`<span class="badge blk">${B.mode === "pause" ? "Internet paused" : esc(`Bedtime ${B.start}–${B.end}, ${dayNames(B.days)}`)}</span>`);
+      if (!B.on_router) badges.push(`<span class="badge warn">Not on router</span>`);
+    }
+    if (d.other_rules) badges.push(`<span class="badge" title="Rules made in the router's own page">Router rule: ${esc(d.other_rules.join(", "))}</span>`);
+    const paused = d.block && d.block.mode === "pause";
+    return `<div class="dev ${d.online ? "" : "off"}" data-mac="${esc(d.mac)}">
+      <span class="dot ${d.online ? "ok" : ""}" title="${d.online ? "Online" : "Offline, last seen " + ago(d.last_seen)}"></span>
+      <div><div class="name" data-act="name" title="Rename">${esc(name)}</div>
+        <div class="meta">${d.ip ? `<span>${esc(d.ip)}</span>` : ""}${link ? `<span>${esc(link)}</span>` : ""}${ping ? `<span>${ping}</span>` : ""}
+          ${d.online ? "" : `<span>seen ${ago(d.last_seen)}</span>`}<span style="color:var(--faint)">${esc(d.mac)}</span></div>
+        ${badges.length ? `<div class="badges">${badges.join("")}</div>` : ""}</div>
+      <div class="acts">
+        <button class="btn" data-act="limit">Speed…</button>
+        <button class="btn ${paused ? "primary" : ""}" data-act="${paused ? "unblock" : "pause"}">${paused ? "Resume internet" : "Pause internet"}</button>
+        <button class="btn" data-act="bedtime">Bedtime…</button>
+      </div></div>`;
+  }).join("");
+}
+$("#q").addEventListener("input", e => { state.q = e.target.value; renderDevices(); });
+$("#filter").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; state.filter = b.dataset.f;
+  try { localStorage.setItem("filter", state.filter); } catch (x) {} renderDevices(); });
+$("#devices").addEventListener("click", async e => {
+  const el = e.target.closest("[data-act]"); if (!el) return;
+  const mac = el.closest(".dev").dataset.mac, d = state.devices.find(x => x.mac === mac); state.current = d;
+  const nm = d.name || d.hostname || d.mac, act = el.dataset.act;
+  if (act === "name") { $("#dNameSub").textContent = d.mac + (d.hostname ? " · router calls it " + d.hostname : ""); $("#nIn").value = d.name || ""; $("#dName").showModal(); $("#nIn").focus(); }
+  if (act === "limit") openLimit(d);
+  if (act === "bedtime") openBlock(d);
+  if (act === "pause" || act === "unblock") {
+    if (act === "pause" && !confirm(`Pause the internet for ${nm}? It stays on the Wi-Fi but can't reach the internet until you press Resume.`)) return;
+    el.disabled = true; el.textContent = "Working…";
+    try { await api("/api/device", act === "pause" ? {mac, action:"block", mode:"pause"} : {mac, action:"unblock"});
+      toast(act === "pause" ? `Internet paused for ${nm}` : `Internet back on for ${nm}`); }
+    catch (x) { toast("Failed: " + x.message); }
+    loadDevices();
+  }
+});
+
+function openLimit(d) {
+  $("#dLimitSub").textContent = (d.name || d.hostname || d.mac) + (d.ip ? " · " + d.ip : "");
+  const L = d.limit || {};
+  $("#lDown").value = L.down ? L.down / 1000 : ""; $("#lUp").value = L.up ? L.up / 1000 : "";
+  $("#lRemove").classList.toggle("hidden", !d.limit); $("#lErr").textContent = "";
+  const st = state.ov && state.ov.selftest || {}, kind = d.link === "wifi" ? "wifi" : "wired", r = st[kind];
+  let note = "Leave a box empty for no limit in that direction.";
+  if (r && r.download_ok === false) note += " On this router download is held down with a low upload cap, which also slows upload.";
+  else if (!r) note += " Tip: run the test on the Check page once to make sure download limits work on this router.";
+  $("#lNote").textContent = note;
+  $("#dLimit").showModal();
+}
+$("#presets").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; $("#lDown").value = b.dataset.d / 1000; $("#lUp").value = b.dataset.u / 1000; });
+$("#lSave").addEventListener("click", async () => {
+  const d = state.current, btn = $("#lSave"); btn.disabled = true; btn.textContent = "Saving…"; $("#lErr").textContent = "";
+  try { await api("/api/device", {mac:d.mac, action:"limit", down:Math.round((+$("#lDown").value || 0) * 1000), up:Math.round((+$("#lUp").value || 0) * 1000)});
+    $("#dLimit").close(); toast("Speed limit saved on the router"); }
+  catch (x) { $("#lErr").textContent = x.message; }
+  btn.disabled = false; btn.textContent = "Save"; loadDevices();
+});
+$("#lRemove").addEventListener("click", async () => {
+  const d = state.current; try { await api("/api/device", {mac:d.mac, action:"unlimit"}); $("#dLimit").close(); toast("Limit removed"); }
+  catch (x) { $("#lErr").textContent = x.message; } loadDevices();
+});
+
+const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+$("#bDays").innerHTML = DAYS.map((d, i) => `<label><input type="checkbox" value="${1 << i}" checked>${d}</label>`).join("");
+function openBlock(d) {
+  $("#dBlockSub").textContent = (d.name || d.hostname || d.mac) + " · no internet during these hours; it stays on the Wi-Fi.";
+  const B = d.block && d.block.mode === "bedtime" ? d.block : null;
+  $("#bFrom").value = B ? B.start : "23:00"; $("#bTo").value = B ? B.end : "07:00";
+  const mask = B ? B.days : 127;
+  document.querySelectorAll("#bDays input").forEach(c => c.checked = !!(mask & +c.value));
+  $("#bRemove").classList.toggle("hidden", !d.block); $("#bRemove").textContent = d.block && d.block.mode === "pause" ? "Resume internet" : "Remove bedtime";
+  $("#bErr").textContent = "";
+  if (state.ov && state.ov.status.clock_ok === false) $("#bErr").textContent = "Warning: the router's clock is not set, so bedtime won't start on time.";
+  $("#dBlock").showModal();
+}
+$("#bSave").addEventListener("click", async () => {
+  const d = state.current, btn = $("#bSave");
+  const days = [...document.querySelectorAll("#bDays input")].reduce((a, c) => a | (c.checked ? +c.value : 0), 0);
+  if (!days) { $("#bErr").textContent = "Choose at least one day"; return; }
+  btn.disabled = true; btn.textContent = "Saving…";
+  try { await api("/api/device", {mac:d.mac, action:"block", mode:"bedtime", start:$("#bFrom").value, end:$("#bTo").value, days});
+    $("#dBlock").close(); toast("Bedtime saved on the router"); }
+  catch (x) { $("#bErr").textContent = x.message; }
+  btn.disabled = false; btn.textContent = "Save"; loadDevices();
+});
+$("#bRemove").addEventListener("click", async () => {
+  try { await api("/api/device", {mac:state.current.mac, action:"unblock"}); $("#dBlock").close(); toast("Removed"); }
+  catch (x) { $("#bErr").textContent = x.message; } loadDevices();
+});
+$("#nSave").addEventListener("click", async () => {
+  try { await api("/api/device", {mac:state.current.mac, action:"name", name:$("#nIn").value}); $("#dName").close(); loadDevices(); }
+  catch (x) { toast(x.message); }
+});
+$("#nIn").addEventListener("keydown", e => { if (e.key === "Enter") $("#nSave").click(); });
+$("#nForget").addEventListener("click", async () => {
+  if (!confirm("Remove this device from the list? It comes back if it connects again.")) return;
+  try { await api("/api/device", {mac:state.current.mac, action:"forget"}); $("#dName").close(); loadDevices(); }
+  catch (x) { toast(x.message); }
+});
+document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => b.closest("dialog").close()));
+
+// ---------- websites
+function renderSites() {
+  const s = state.ov && state.ov.sites;
+  if (s == null) { $("#sites").innerHTML = `<li class="hint">${state.ov && state.ov.status.connected ? "This router has no website-blocking page that this program knows." : "Waiting for the router…"}</li>`; return; }
+  $("#sites").innerHTML = s.length ? s.map(x => `<li><span>${esc(x.url)} <span class="hint">${x.schedule && x.schedule !== "Always" ? "· " + esc(x.schedule) : ""}</span></span><button class="btn danger" data-url="${esc(x.url)}">Unblock</button></li>`).join("")
+    : `<li class="hint">No websites blocked.</li>`;
+}
+$("#siteAdd").addEventListener("click", async () => {
+  const v = $("#siteIn").value.trim(); if (!v) return;
+  try { const r = await api("/api/site", {action:"add", url:v}); state.ov.sites = r.sites; $("#siteIn").value = ""; renderSites(); toast("Website blocked"); }
+  catch (x) { toast("Failed: " + x.message); }
+});
+$("#siteIn").addEventListener("keydown", e => { if (e.key === "Enter") $("#siteAdd").click(); });
+$("#sites").addEventListener("click", async e => { const b = e.target.closest("button[data-url]"); if (!b) return;
+  try { const r = await api("/api/site", {action:"remove", url:b.dataset.url}); state.ov.sites = r.sites; renderSites(); } catch (x) { toast("Failed: " + x.message); } });
+
+// ---------- check
+const FEAT = {qos:"Speed rules list", qosform:"Speed limit form", blockmac:"Block / pause device", sched:"Schedules (bedtime)",
+              urlflt:"Website blocking", stations:"Wi-Fi device list", arp:"Address table"};
+function renderCheck() {
+  const o = state.ov; if (!o) return;
+  const f = o.features || {};
+  $("#feat").innerHTML = Object.keys(f).length ? Object.entries(FEAT).map(([k, n]) => `<div><span class="dot ${f[k] ? "ok" : "bad"}"></span>${n}</div>`).join("")
+    : `<span class="hint">Shown once the router is connected.</span>`;
+  const run = o.selftest_run || {};
+  $("#stRun").disabled = !!run.running || !o.status.connected;
+  $("#stRun").textContent = run.running ? "Testing… (about 1 minute)" : "Run the speed-limit test";
+  $("#stSteps").innerHTML = (run.steps || []).map(s => `<li>${esc(s.text)}</li>`).join("");
+  const prev = o.selftest || {};
+  $("#stPrev").innerHTML = Object.entries(prev).map(([k, r]) => `Last test on a ${k === "wifi" ? "Wi-Fi" : "cable"} device (${new Date(r.time*1000).toLocaleString()}): upload ${r.upload_ok ? "✓ works" : "✗ not limited"}, download ${r.download_ok ? "✓ works" : (r.trick_ok ? "via upload trick" : "✗ not limited")}.`).join("<br>");
+}
+$("#stRun").addEventListener("click", async () => {
+  if (!confirm("This limits this computer's internet for about a minute and uses about 100 MB of data. Start?")) return;
+  try { await api("/api/selftest", {}); } catch (x) { toast(x.message); } loadOverview();
+});
+$("#repLoad").addEventListener("click", async () => {
+  $("#rep").value = "Creating the report…";
+  try { $("#rep").value = await api("/api/report"); $("#repCopy").disabled = $("#repSave").disabled = false; }
+  catch (x) { $("#rep").value = "Failed: " + x.message; }
+});
+$("#repCopy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("#rep").value); toast("Report copied"); }
+  catch (x) { $("#rep").select(); document.execCommand("copy"); toast("Report copied"); }
+});
+$("#repSave").addEventListener("click", () => {
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([$("#rep").value], {type:"text/plain"}));
+  a.download = "router-report.txt"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+async function loadLog() { try { $("#log").value = (await api("/api/log")).lines.reverse().join("\n") || "Nothing yet."; } catch (x) {} }
+
+// ---------- settings
+async function loadSettings() {
+  try { const s = await api("/api/settings");
+    $("#sHost").value = s.host; $("#sUser").value = s.username; $("#sMethod").value = s.download_method; $("#sPing").value = s.internet_ping;
+    $("#sPass").placeholder = s.has_password ? "(saved — type to change)" : "router password"; } catch (x) {}
+}
+$("#sSave").addEventListener("click", async () => {
+  const btn = $("#sSave"); btn.disabled = true; btn.textContent = "Connecting…"; $("#sErr").textContent = "";
+  try { await api("/api/settings", {host:$("#sHost").value, username:$("#sUser").value, password:$("#sPass").value,
+      download_method:$("#sMethod").value, internet_ping:$("#sPing").value});
+    $("#sPass").value = ""; toast("Connected to the router"); show("home"); loadOverview(); setTimeout(loadDevices, 1500); }
+  catch (x) { $("#sErr").textContent = x.message; }
+  btn.disabled = false; btn.textContent = "Save and connect";
+});
+
+// ---------- loop
+loadOverview(); loadDevices();
+setInterval(loadOverview, 3000);
+setInterval(() => { if (!document.querySelector("dialog[open]")) loadDevices(); }, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "router": {"host": "192.168.1.1", "username": "admin", "password": ""},
+  "port": 8770,
+  "download_method": "auto",
+  "internet_ping": "1.1.1.1",
+  "wifi_bands": {"wl0": "2.4 GHz", "wl1": "5 GHz"},
+  "wan_interface": "",
+  "pages": {},
+  "params": {}
+}
