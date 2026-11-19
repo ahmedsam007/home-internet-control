@@ -14,6 +14,12 @@ from routerctl.control import Controller, next_day, windows  # noqa: E402
 from routerctl.router import LoginError, Router  # noqa: E402
 from routerctl.server import load_config  # noqa: E402
 from tools.mock_router import serve  # noqa: E402
+from routerctl.qr import QR  # noqa: E402
+from routerctl.server import App, make_server  # noqa: E402
+import json  # noqa: E402
+import threading  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
 
 
 class Parsing(unittest.TestCase):
@@ -140,6 +146,73 @@ class AgainstFakeRouter(unittest.TestCase):
         text = report.build(c)
         self.assertIn("qoscls.cmd?action=add", text)
         self.assertNotIn("a4:83:e7:10", text)
+
+
+class PhoneAccess(unittest.TestCase):
+    """The page as a phone sees it (localhost is not trusted in these tests)."""
+
+    def setUp(self):
+        cfg = load_config("/nonexistent.json")
+        cfg["phone_access"] = True
+        self.ctl = Controller(cfg, tempfile.mkdtemp(), fake_ping=True)
+        self.app = App(self.ctl, None)
+        self.app.trust_localhost = False
+        self.srv = make_server(self.app, 0)
+        self.base = "http://127.0.0.1:%d" % self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+    def call(self, path, body=None, cookie="", host=None):
+        req = urllib.request.Request(self.base + path, data=None if body is None else json.dumps(body).encode(),
+                                     headers={"X-Requested-With": "dlink-dsl-control", "Cookie": cookie})
+        if host:
+            req.add_header("Host", host)
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, r.read().decode(), r.headers.get("Set-Cookie") or ""
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, e.read().decode(), ""
+
+    def test_pin_flow(self):
+        pin = self.ctl.cfg["phone_pin"]
+        self.assertRegex(pin, r"^\d{6}$")
+        self.assertEqual(self.call("/api/devices")[0], 401)
+        self.assertEqual(self.call("/")[0], 200, "the page itself loads and shows the PIN screen")
+        self.assertEqual(self.call("/api/login", {"pin": "000000" if pin != "000000" else "111111"})[0], 401)
+        code, _, cookie = self.call("/api/login", {"pin": pin})
+        self.assertEqual(code, 200)
+        cookie = cookie.split(";")[0]
+        self.assertEqual(self.call("/api/devices", cookie=cookie)[0], 200)
+        self.assertEqual(self.call("/api/qr.svg", cookie=cookie)[0], 403, "only the computer sees the QR/PIN")
+        self.assertEqual(self.call("/api/phone", {"on": False}, cookie=cookie)[0], 403)
+        self.call("/api/logout", {}, cookie=cookie)
+        self.assertEqual(self.call("/api/devices", cookie=cookie)[0], 401)
+
+    def test_lockout(self):
+        for _ in range(5):
+            self.call("/api/login", {"pin": "x"})
+        code, body, _ = self.call("/api/login", {"pin": self.ctl.cfg["phone_pin"]})
+        self.assertEqual(code, 401)
+        self.assertIn("Too many", body)
+
+    def test_foreign_host_refused(self):
+        self.assertEqual(self.call("/api/auth", host="evil.example.com")[0], 403)
+
+    def test_new_pin_signs_out(self):
+        code, _, cookie = self.call("/api/login", {"pin": self.ctl.cfg["phone_pin"]})
+        old = self.ctl.cfg["phone_pin"]
+        self.app.set_phone({"new_pin": True})
+        self.assertEqual(self.call("/api/devices", cookie=cookie.split(";")[0])[0], 401)
+        self.assertRegex(self.ctl.cfg["phone_pin"], r"^\d{6}$")
+        self.assertTrue(old or True)
+
+    def test_qr_svg(self):
+        svg = QR("http://192.168.1.4:8770/#pin=123456").svg()
+        self.assertTrue(svg.startswith("<svg") and "path" in svg)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ A simple page on your computer that shows who is using the home internet and let
 | **Bedtime** | No internet for a device between, for example, 23:00 and 07:00, on the days you choose |
 | **Block websites** | Block a website for the whole house |
 | **Ping** | Ping to the internet, to the router and to every device, with a small history |
+| **Phone** | Use the same page from phones on the home Wi-Fi, protected by a PIN, with a QR code to sign in and an app icon |
 | **Check** | A one-minute test that proves the limits really work on *your* router, and a report to send to whoever helps you |
 
 Everything runs on your own computer. Nothing is sent anywhere, except during the speed test on the Check page (it downloads test data from speed.cloudflare.com).
@@ -31,7 +32,20 @@ Keep the black window open while you use the page; closing it stops the program.
 
 To try it without a router: `python run.py --demo`. This starts a fake router.
 
-To open the page from a phone in the house as well, start it with `python run.py --lan` and open `http://<computer's address>:8770` on the phone. **Anyone on your Wi-Fi can then use the page**, so only do this at home.
+## Use it from your phone
+
+The program runs on the computer; phones on the **home Wi-Fi** can open the same page.
+
+1. On the computer: **Settings → Use from your phone → Turn on** (or start with `start-with-phone` instead of `start`). On Windows, if asked, press **Allow** for Python on private networks.
+2. A QR code and a 6-digit **PIN** appear in Settings (and in the black window).
+3. On the phone: point the camera at the QR code and open the link. The QR code includes the PIN, so the phone is signed in straight away. Or type the address and enter the PIN.
+4. Make it an app icon: **iPhone** Safari → Share → *Add to Home Screen*. **Android** Chrome → ⋮ → *Add to Home screen*.
+
+Good to know:
+- Phones stay signed in. **New PIN** in Settings signs every phone out (for example if someone saw the PIN).
+- After 5 wrong PINs a phone must wait 5 minutes.
+- The computer must be on with the program running. Away from home the page cannot be reached; that keeps it private.
+- Turning phone access on or off, and seeing the PIN, is only possible on the computer itself.
 
 ## How it works (and its limits)
 
@@ -69,13 +83,15 @@ Open **Check → Create report → Copy** and send it to whoever helps you. It l
 ## Files
 
 ```
-run.py               starts everything
+run.py               starts everything (start-*.bat / start-*.command double-click it)
 routerctl/router.py  talks to the router (login, pages, rules)
 routerctl/control.py devices, limits, blocks, background checks
 routerctl/selftest.py the speed-limit test
 routerctl/report.py  the report for helpers
+routerctl/qr.py      QR codes for the phone link (no library needed)
 routerctl/web/       the page
 tools/mock_router.py fake router for the demo and tests
+tools/make_icons.py  draws the home-screen icons
 tests/               python -m unittest discover -s tests
 config.json          your settings (created on first save, holds the router password — keep it private)
 data/                remembered devices, limits and the action log

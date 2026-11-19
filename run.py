@@ -89,16 +89,38 @@ def main():
     url = "http://127.0.0.1:%d/" % port
     print("D-Link DSL Control%s is running." % (" (DEMO, fake router)" if a.demo else ""))
     print("Open %s in your browser. Close this window to stop it." % url)
-    if a.lan:
-        print("Other devices in the house can open http://<this computer's address>:%d/" % port)
     if not a.no_open:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
-        httpd.serve_forever()
+        while True:
+            if app.phone_on:
+                show_phone(app)
+            httpd.serve_forever()
+            httpd.server_close()
+            if not app.restart:
+                break
+            app.restart = False
+            time.sleep(0.3)
+            try:
+                httpd = make_server(app, port)
+            except OSError as e:
+                print("Could not re-open the page on port %d (%s); retrying…" % (port, e))
+                time.sleep(2)
+                httpd = make_server(app, port)
+            print("Phone access is now %s." % ("ON" if app.phone_on else "OFF"))
     except KeyboardInterrupt:
         pass
     finally:
         ctl.stop()
+
+
+def show_phone(app):
+    from routerctl.qr import print_terminal
+    print()
+    print("Phones on the home Wi-Fi can open:  %s" % app.phone_url())
+    print("PIN: %s    (or scan this code with the phone camera)" % app.ctl.cfg.get("phone_pin"))
+    print_terminal(app.phone_url(with_pin=True))
+    print()
 
 
 if __name__ == "__main__":

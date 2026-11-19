@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Home Internet Control</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2f6fdd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Home Internet">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%232f6fdd' d='M12 18a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm0-6c2.5 0 4.7 1 6.4 2.6l-1.6 1.6A6.7 6.7 0 0 0 12 14.3c-1.9 0-3.6.7-4.8 1.9l-1.6-1.6A9 9 0 0 1 12 12Zm0-6c4.2 0 8 1.7 10.8 4.4l-1.6 1.6A13 13 0 0 0 12 8.3c-3.6 0-6.9 1.4-9.2 3.7L1.2 10.4A15.3 15.3 0 0 1 12 6Z'/%3E%3C/svg%3E">
 <style>
 :root{
@@ -110,6 +117,18 @@ textarea{width:100%;min-height:220px;font:12px/1.4 ui-monospace,Menlo,Consolas,m
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100vw - 32px)}
 .toast.show{opacity:1}
 .hidden{display:none!important}
+#lock{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
+#lock .box{width:min(340px,100%);text-align:center}
+#lock img{width:64px;height:64px;border-radius:14px}
+#lock h2{margin:14px 0 4px;font-size:20px}
+#lock input{width:100%;text-align:center;font-size:28px;letter-spacing:.3em;padding:10px;margin:16px 0 10px}
+#lock .btn{width:100%;padding:10px}
+.qrbox{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+.qrbox img{width:200px;height:200px;border-radius:8px;background:#fff;padding:6px;border:1px solid var(--line)}
+.pin{font-size:26px;font-weight:700;letter-spacing:.15em;font-variant-numeric:tabular-nums}
+.addr{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;word-break:break-all}
+.switch{display:flex;align-items:center;gap:10px;margin:4px 0 12px}
+ol.how{margin:6px 0 0;padding-left:20px;font-size:14px;color:var(--muted)} ol.how li{margin:3px 0}
 .usage{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:8px}
 .usage b{color:var(--text);font-variant-numeric:tabular-nums}
 @media (max-width:760px){
@@ -124,6 +143,14 @@ textarea{width:100%;min-height:220px;font:12px/1.4 ui-monospace,Menlo,Consolas,m
 </style>
 </head>
 <body>
+<div id="lock" class="hidden"><div class="box">
+  <img src="icon-180.png" alt="">
+  <h2>Home Internet Control</h2>
+  <div class="hint">Enter the PIN shown on the computer (Settings → Use from your phone).</div>
+  <input id="pinIn" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="8" aria-label="PIN">
+  <button class="btn primary" id="pinGo">Open</button>
+  <div class="err" id="pinErr"></div>
+</div></div>
 <div class="wrap">
   <header>
     <h1>Home Internet Control</h1>
@@ -203,6 +230,31 @@ textarea{width:100%;min-height:220px;font:12px/1.4 ui-monospace,Menlo,Consolas,m
 
   <!-- SETTINGS -->
   <section id="tab-settings" class="hidden">
+    <div class="card hidden" id="phoneCard">
+      <h2>Use from your phone</h2>
+      <div class="switch"><button class="btn" id="phToggle">Turn on</button><span class="hint" id="phState"></span></div>
+      <div id="phOn" class="hidden">
+        <div class="qrbox">
+          <img id="phQr" alt="QR code that opens this page on a phone">
+          <div>
+            <div class="hint">PIN</div><div class="pin" id="phPin"></div>
+            <div class="hint" style="margin-top:8px">Address</div><div class="addr" id="phUrl"></div>
+            <ol class="how">
+              <li>Connect the phone to the home Wi-Fi.</li>
+              <li>Point the phone camera at the code and open the link.</li>
+              <li>To make it an app: iPhone: Share → <b>Add to Home Screen</b>. Android: ⋮ menu → <b>Add to Home screen</b>.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="foot" style="justify-content:flex-start"><button class="btn" id="phNewPin">New PIN (signs out all phones)</button><span class="hint" id="phCount"></span></div>
+        <p class="hint">Keep this computer on with the program running; phones use it to reach the router. Works on the home Wi-Fi only.</p>
+      </div>
+    </div>
+    <div class="card hidden" id="thisPhone">
+      <h2>This phone</h2>
+      <p class="hint" style="margin-top:0">This phone is signed in with the PIN. Phone access and the PIN are changed on the computer.</p>
+      <button class="btn" id="signOut">Sign out this phone</button>
+    </div>
     <div class="card">
       <h2>Router login</h2>
       <p class="hint" style="margin-top:0">The same address, user name and password you use to open the router's page in a browser.</p>
@@ -275,6 +327,7 @@ async function api(path, body) {
   const r = await fetch(path, opt);
   const ct = r.headers.get("Content-Type") || "";
   const data = ct.includes("json") ? await r.json() : await r.text();
+  if (r.status === 401 && data && data.need_pin) { showLock(); throw new Error("PIN needed"); }
   if (!r.ok) throw new Error((data && data.error) || ("HTTP " + r.status));
   return data;
 }
@@ -561,7 +614,47 @@ $("#repSave").addEventListener("click", () => {
 async function loadLog() { try { $("#log").value = (await api("/api/log")).lines.reverse().join("\n") || "Nothing yet."; } catch (x) {} }
 
 // ---------- settings
+async function loadPhone() {
+  try {
+    const p = await api("/api/phone");
+    $("#phoneCard").classList.toggle("hidden", !!p.remote); $("#thisPhone").classList.toggle("hidden", !p.remote);
+    if (p.remote) return;
+    $("#phToggle").textContent = p.on ? "Turn off" : "Turn on"; $("#phToggle").disabled = p.forced;
+    $("#phState").textContent = p.forced ? "On (started with “start-with-phone”)" : (p.on ? "On — phones on the home Wi-Fi can use this page" : "Off — only this computer can use this page");
+    $("#phOn").classList.toggle("hidden", !p.on);
+    if (p.on) { $("#phPin").textContent = p.pin; $("#phUrl").textContent = p.url; $("#phQr").src = "/api/qr.svg?t=" + Date.now();
+      $("#phCount").textContent = p.phones ? p.phones + " phone(s) signed in" : ""; }
+  } catch (x) {}
+}
+async function waitBack() {
+  for (let i = 0; i < 20; i++) { await new Promise(r => setTimeout(r, 700)); try { await api("/api/auth"); return; } catch (x) {} }
+}
+$("#phToggle").addEventListener("click", async () => {
+  const on = $("#phToggle").textContent === "Turn on";
+  if (on && !confirm("Let phones on the home Wi-Fi open this page? They need the PIN shown next. Windows may ask to allow Python on the network: choose Allow.")) return;
+  $("#phToggle").disabled = true; $("#phState").textContent = "Switching…";
+  try { const r = await api("/api/phone", {on}); if (r.restart) await waitBack(); } catch (x) { toast(x.message); }
+  $("#phToggle").disabled = false; loadPhone();
+});
+$("#phNewPin").addEventListener("click", async () => {
+  if (!confirm("Make a new PIN? Every phone has to sign in again.")) return;
+  try { await api("/api/phone", {new_pin:true}); loadPhone(); toast("New PIN made"); } catch (x) { toast(x.message); }
+});
+$("#signOut").addEventListener("click", async () => { try { await api("/api/logout", {}); } catch (x) {} showLock(); });
+
+// ---------- PIN screen (phones only)
+let unlocked = false;
+function showLock() { unlocked = false; $("#lock").classList.remove("hidden"); setTimeout(() => $("#pinIn").focus(), 50); }
+async function login(pin) {
+  try { await api("/api/login", {pin}); $("#lock").classList.add("hidden"); $("#pinErr").textContent = ""; $("#pinIn").value = "";
+        unlocked = true; loadOverview(); loadDevices(); return true; }
+  catch (x) { $("#pinErr").textContent = x.message; return false; }
+}
+$("#pinGo").addEventListener("click", () => login($("#pinIn").value));
+$("#pinIn").addEventListener("keydown", e => { if (e.key === "Enter") login($("#pinIn").value); });
+
 async function loadSettings() {
+  loadPhone();
   try { const s = await api("/api/settings");
     $("#sHost").value = s.host; $("#sUser").value = s.username; $("#sMethod").value = s.download_method; $("#sPing").value = s.internet_ping;
     $("#sPass").placeholder = s.has_password ? "(saved — type to change)" : "router password"; } catch (x) {}
@@ -576,9 +669,17 @@ $("#sSave").addEventListener("click", async () => {
 });
 
 // ---------- loop
-loadOverview(); loadDevices();
-setInterval(loadOverview, 3000);
-setInterval(() => { if (!document.querySelector("dialog[open]")) loadDevices(); }, 5000);
+(async function boot() {
+  const m = location.hash.match(/pin=(\d{4,8})/);
+  if (m) history.replaceState(null, "", location.pathname);   // keep the PIN out of the address bar
+  let a = {authed:true};
+  try { a = await api("/api/auth"); } catch (x) {}
+  if (!a.authed) { if (!(m && await login(m[1]))) showLock(); }
+  else { unlocked = true; loadOverview(); loadDevices(); }
+  const tab = location.hash.slice(1); if (["sites", "check", "settings"].includes(tab)) show(tab);
+  setInterval(() => { if (unlocked) loadOverview(); }, 3000);
+  setInterval(() => { if (unlocked && !document.querySelector("dialog[open]")) loadDevices(); }, 5000);
+})();
 </script>
 </body>
 </html>
